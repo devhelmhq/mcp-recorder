@@ -50,6 +50,7 @@ dev = [
     "ruff>=0.11",
     "mypy>=1.15",
     "pyyaml>=6.0.3",
+    "pre-commit>=4.0",
 ]
 
 [build-system]
