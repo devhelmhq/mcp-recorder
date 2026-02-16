@@ -1,0 +1,81 @@
+[project]
+name = "mcp-recorder"
+version = "0.1.0"
+description = "Record and replay MCP server interactions for deterministic testing."
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "caballeto", email = "elminsteraumar4@gmail.com" },
+]
+keywords = ["mcp", "testing", "recording", "replay", "ai", "llm", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.3.1",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.5",
+    "starlette>=0.52.1",
+    "uvicorn>=0.40.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/devhelm/mcp-recorder"
+Repository = "https://github.com/devhelm/mcp-recorder"
+Issues = "https://github.com/devhelm/mcp-recorder/issues"
+
+[project.scripts]
+mcp-recorder = "mcp_recorder.cli:main"
+
+[project.entry-points."pytest11"]
+mcp_recorder = "mcp_recorder.pytest_plugin"
+
+[project.optional-dependencies]
+yaml = [
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "pyyaml>=6.0.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.19,<0.9.0"]
+build-backend = "uv_build"
+
+# --- Tool Configuration ---
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mcp_recorder"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
