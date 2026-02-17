@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class InteractionType(str, Enum):
+class InteractionType(StrEnum):
     """Classification of an MCP interaction."""
 
     JSONRPC_REQUEST = "jsonrpc_request"
