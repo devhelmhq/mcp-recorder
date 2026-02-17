@@ -11,14 +11,8 @@ import click
 import uvicorn
 
 from mcp_recorder import __version__
-from mcp_recorder._types import RawRecording
+from mcp_recorder._types import Cassette, CassetteMetadata
 from mcp_recorder.proxy import create_proxy_app
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    stream=sys.stderr,
-)
 
 
 @click.group()
@@ -31,54 +25,49 @@ def main() -> None:
 @click.option("--target", required=True, help="URL of the real MCP server.")
 @click.option("--port", default=5555, show_default=True, help="Local proxy port.")
 @click.option("--output", default="recording.json", show_default=True, help="Output cassette file.")
-@click.option(
-    "--format", "fmt", default="json", show_default=True, help="Cassette format (json/yaml)."
-)
+@click.option("--verbose", is_flag=True, help="Log full headers and bodies to stderr.")
 @click.option("--no-redact", is_flag=True, help="Disable automatic secret redaction.")
 @click.option("--redact-patterns", multiple=True, help="Additional regex patterns to redact.")
 def record(
     target: str,
     port: int,
     output: str,
-    fmt: str,
+    verbose: bool,
     no_redact: bool,
     redact_patterns: tuple[str, ...],
 ) -> None:
     """Record interactions from a live MCP server."""
-    recording = RawRecording(target=target)
-    app = create_proxy_app(target_url=target, recording=recording)
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+
+    cassette = Cassette(metadata=CassetteMetadata(server_url=target))
+    app = create_proxy_app(target_url=target, cassette=cassette, verbose=verbose)
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Proxying http://localhost:{port} -> {target}")
-    click.echo(f"Output:  {output_path}")
-    click.echo("Press Ctrl+C to stop and save the recording.\n")
+    click.echo(f"Proxying http://localhost:{port} -> {target}", err=True)
+    click.echo(f"Output:  {output_path}", err=True)
+    click.echo("Press Ctrl+C to stop and save the recording.\n", err=True)
 
     try:
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=port,
-            log_level="warning",
-        )
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
     except KeyboardInterrupt:
         pass
     finally:
-        _save_recording(recording, output_path)
+        _save_cassette(cassette, output_path)
 
 
-def _save_recording(recording: RawRecording, path: Path) -> None:
-    """Flush the in-memory recording to disk."""
-    recording.interaction_count = len(recording.interactions)
-
-    if recording.interaction_count == 0:
-        click.echo("\nNo interactions captured. Nothing to save.")
+def _save_cassette(cassette: Cassette, path: Path) -> None:
+    """Flush the cassette to disk as JSON."""
+    count = len(cassette.interactions)
+    if count == 0:
+        click.echo("\nNo interactions captured. Nothing to save.", err=True)
         return
 
-    data = recording.model_dump(mode="json")
+    data = cassette.model_dump(mode="json")
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    click.echo(f"\nSaved {recording.interaction_count} interactions to {path}")
+    click.echo(f"\nSaved {count} interactions to {path}", err=True)
 
 
 @main.command()
@@ -95,7 +84,7 @@ def _save_recording(recording: RawRecording, path: Path) -> None:
 def replay(cassette: str, port: int, match: str, simulate_latency: bool) -> None:
     """Start a mock server from a recorded cassette."""
     click.echo(f"Replaying {cassette} on port {port} (match={match})")
-    raise NotImplementedError("Replay will be implemented in Phase 3.")
+    raise NotImplementedError("Replay will be implemented next.")
 
 
 @main.command()
@@ -106,7 +95,7 @@ def replay(cassette: str, port: int, match: str, simulate_latency: bool) -> None
 def verify(cassette: str, target: str, ignore_fields: tuple[str, ...], update: bool) -> None:
     """Replay recorded requests against a server and compare responses."""
     click.echo(f"Verifying {cassette} against {target}")
-    raise NotImplementedError("Verify will be implemented in Phase 3.")
+    raise NotImplementedError("Verify will be implemented next.")
 
 
 @main.command()
@@ -114,4 +103,4 @@ def verify(cassette: str, target: str, ignore_fields: tuple[str, ...], update: b
 def inspect(cassette: str) -> None:
     """Pretty-print a cassette summary."""
     click.echo(f"Inspecting {cassette}")
-    raise NotImplementedError("Inspect will be implemented in Phase 4.")
+    raise NotImplementedError("Inspect will be implemented next.")

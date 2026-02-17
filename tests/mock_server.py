@@ -1,5 +1,7 @@
 """Minimal FastMCP server for manual and integration testing."""
 
+from typing import Any
+
 from fastmcp import FastMCP
 
 mcp = FastMCP("Test Calculator")
@@ -24,7 +26,7 @@ def echo(message: str) -> str:
 
 
 @mcp.tool
-def get_weather(city: str) -> dict:
+def get_weather(city: str) -> dict[str, Any]:
     """Get fake weather data for a city."""
     return {"city": city, "temp_c": 22, "condition": "sunny", "humidity": 45}
 

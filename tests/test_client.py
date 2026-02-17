@@ -12,9 +12,9 @@ async def main() -> None:
 
     async with Client(proxy_url) as client:
         # initialize already happened inside the context manager
-        server_info = client.initialize_result.serverInfo  # type: ignore[union-attr]
+        server_info = client.initialize_result.serverInfo
         print(f"Server: {server_info.name}")
-        print(f"Capabilities: {client.initialize_result.capabilities}\n")  # type: ignore[union-attr]
+        print(f"Capabilities: {client.initialize_result.capabilities}\n")
 
         # List tools
         tools = await client.list_tools()
