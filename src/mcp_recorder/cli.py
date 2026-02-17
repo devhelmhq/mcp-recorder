@@ -12,7 +12,9 @@ import uvicorn
 
 from mcp_recorder import __version__
 from mcp_recorder._types import Cassette, CassetteMetadata
+from mcp_recorder.matcher import create_matcher
 from mcp_recorder.proxy import create_proxy_app
+from mcp_recorder.replayer import create_replay_app
 
 
 @click.group()
@@ -58,6 +60,12 @@ def record(
         _save_cassette(cassette, output_path)
 
 
+def _load_cassette(path: Path) -> Cassette:
+    """Load a cassette from a JSON file."""
+    raw = json.loads(path.read_text())
+    return Cassette.model_validate(raw)
+
+
 def _save_cassette(cassette: Cassette, path: Path) -> None:
     """Flush the cassette to disk as JSON."""
     count = len(cassette.interactions)
@@ -80,11 +88,42 @@ def _save_cassette(cassette: Cassette, path: Path) -> None:
     type=click.Choice(["method_params", "sequential", "strict"]),
     help="Request matching strategy.",
 )
-@click.option("--simulate-latency", is_flag=True, help="Replay with original recorded timing.")
-def replay(cassette: str, port: int, match: str, simulate_latency: bool) -> None:
-    """Start a mock server from a recorded cassette."""
-    click.echo(f"Replaying {cassette} on port {port} (match={match})")
-    raise NotImplementedError("Replay will be implemented next.")
+@click.option("--verbose", is_flag=True, help="Log every matched request to stderr.")
+def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
+    """Start a mock MCP server from a recorded cassette."""
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+
+    cassette_path = Path(cassette)
+    if not cassette_path.exists():
+        click.echo(f"Error: cassette file not found: {cassette_path}", err=True)
+        raise SystemExit(1)
+
+    loaded = _load_cassette(cassette_path)
+    matcher_obj = create_matcher(match, loaded.interactions)
+    app = create_replay_app(loaded, matcher_obj)
+
+    total = sum(1 for i in loaded.interactions if i.type.value == "jsonrpc_request")
+    click.echo(f"Replaying {cassette_path.name} ({total} request interactions)", err=True)
+    click.echo(f"Matching strategy: {match}", err=True)
+    click.echo(f"Mock server: http://localhost:{port}/mcp", err=True)
+    click.echo("Press Ctrl+C to stop.\n", err=True)
+
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if matcher_obj.all_consumed:
+            click.echo("\nAll recorded interactions were consumed.", err=True)
+        else:
+            remaining = total - matcher_obj._matched_count
+            click.echo(f"\nWarning: {remaining} recorded interactions were NOT consumed.", err=True)
+        if matcher_obj.unmatched_requests:
+            click.echo(
+                f"{len(matcher_obj.unmatched_requests)} incoming request(s) had no match.",
+                err=True,
+            )
 
 
 @main.command()
