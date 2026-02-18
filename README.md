@@ -122,18 +122,36 @@ Exit code is non-zero on any diff — plug it straight into CI.
 
 ### Testing with pytest
 
+The plugin activates automatically when `mcp-recorder` is installed. Mark tests with a cassette path and request the `mcp_replay_url` fixture:
+
 ```python
-@pytest.mark.mcp_cassette("golden.json")
-def test_search_tool(mcp_client):
-    result = mcp_client.call_tool("search", {"query": "protocol"})
-    assert result["content"][0]["text"] == "expected output"
+import pytest
+from fastmcp import Client
+
+@pytest.mark.mcp_cassette("cassettes/golden.json")
+async def test_search_tool(mcp_replay_url):
+    async with Client(mcp_replay_url) as client:
+        result = await client.call_tool("search", {"query": "protocol"})
+        assert result.content[0].text == "expected output"
 ```
 
-First run records (cassette doesn't exist). Subsequent runs replay. Override with:
+A replay server starts automatically on a random port, serves the cassette, and shuts down after the test. No manual server management.
+
+For server regression testing, use `mcp_verify_result`:
+
+```python
+@pytest.mark.mcp_cassette("cassettes/golden.json")
+def test_no_regression(mcp_verify_result):
+    assert mcp_verify_result.failed == 0, mcp_verify_result.results
+```
 
 ```bash
-MCP_RECORDER_MODE=record pytest    # Force re-record
-MCP_RECORDER_MODE=replay pytest    # Force replay only
+# Run with --mcp-target pointing at your live server
+pytest --mcp-target http://localhost:8000
+
+# Control replay mode
+pytest --mcp-record-mode=replay   # default: serve from cassette
+pytest --mcp-record-mode=auto     # replay if cassette exists, skip if not
 ```
 
 ## CLI Reference
