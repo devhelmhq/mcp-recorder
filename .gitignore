@@ -35,7 +35,7 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Cassettes generated during dev (examples are tracked)
-cassettes/
+# Cassettes generated during dev (test fixtures in tests/cassettes/ are tracked)
+/cassettes/
 *.cassette.json
 *.cassette.yaml

@@ -1,0 +1,413 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "recorded_at": "2026-02-17T20:25:23.855390+00:00",
+    "server_url": "http://127.0.0.1:8000",
+    "protocol_version": "2025-11-25",
+    "server_info": {
+      "name": "Test Calculator",
+      "version": "2.14.5"
+    }
+  },
+  "interactions": [
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "mcp",
+            "version": "0.1.0"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "experimental": {},
+            "prompts": {
+              "listChanged": true
+            },
+            "resources": {
+              "subscribe": false,
+              "listChanged": true
+            },
+            "tools": {
+              "listChanged": true
+            },
+            "tasks": {
+              "list": {},
+              "cancel": {},
+              "requests": {
+                "tools": {
+                  "call": {}
+                },
+                "prompts": {
+                  "get": {}
+                },
+                "resources": {
+                  "read": {}
+                }
+              }
+            }
+          },
+          "serverInfo": {
+            "name": "Test Calculator",
+            "version": "2.14.5"
+          }
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 7,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "notification",
+      "request": {
+        "method": "notifications/initialized",
+        "jsonrpc": "2.0"
+      },
+      "response": null,
+      "response_is_sse": false,
+      "response_status": 202,
+      "latency_ms": 1,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "tools/list",
+        "jsonrpc": "2.0",
+        "id": 1
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "add",
+              "description": "Add two numbers.",
+              "inputSchema": {
+                "properties": {
+                  "a": {
+                    "type": "integer"
+                  },
+                  "b": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "a",
+                  "b"
+                ],
+                "type": "object"
+              },
+              "outputSchema": {
+                "properties": {
+                  "result": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "result"
+                ],
+                "type": "object",
+                "x-fastmcp-wrap-result": true
+              },
+              "_meta": {
+                "_fastmcp": {
+                  "tags": []
+                }
+              }
+            },
+            {
+              "name": "multiply",
+              "description": "Multiply two numbers.",
+              "inputSchema": {
+                "properties": {
+                  "a": {
+                    "type": "number"
+                  },
+                  "b": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "a",
+                  "b"
+                ],
+                "type": "object"
+              },
+              "outputSchema": {
+                "properties": {
+                  "result": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "result"
+                ],
+                "type": "object",
+                "x-fastmcp-wrap-result": true
+              },
+              "_meta": {
+                "_fastmcp": {
+                  "tags": []
+                }
+              }
+            },
+            {
+              "name": "echo",
+              "description": "Echo back the input message.",
+              "inputSchema": {
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message"
+                ],
+                "type": "object"
+              },
+              "outputSchema": {
+                "properties": {
+                  "result": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "result"
+                ],
+                "type": "object",
+                "x-fastmcp-wrap-result": true
+              },
+              "_meta": {
+                "_fastmcp": {
+                  "tags": []
+                }
+              }
+            },
+            {
+              "name": "get_weather",
+              "description": "Get fake weather data for a city.",
+              "inputSchema": {
+                "properties": {
+                  "city": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "city"
+                ],
+                "type": "object"
+              },
+              "outputSchema": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "_meta": {
+                "_fastmcp": {
+                  "tags": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 22,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "add",
+          "arguments": {
+            "a": 2,
+            "b": 3
+          },
+          "_meta": {
+            "progressToken": 2
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "5"
+            }
+          ],
+          "structuredContent": {
+            "result": 5
+          },
+          "isError": false
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 18,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "multiply",
+          "arguments": {
+            "a": 3.5,
+            "b": 2.0
+          },
+          "_meta": {
+            "progressToken": 3
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 3
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "7.0"
+            }
+          ],
+          "structuredContent": {
+            "result": 7.0
+          },
+          "isError": false
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 4,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "echo",
+          "arguments": {
+            "message": "hello mcp-recorder"
+          },
+          "_meta": {
+            "progressToken": 4
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 4
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "hello mcp-recorder"
+            }
+          ],
+          "structuredContent": {
+            "result": "hello mcp-recorder"
+          },
+          "isError": false
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 6,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "get_weather",
+          "arguments": {
+            "city": "London"
+          },
+          "_meta": {
+            "progressToken": 5
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 5
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"city\":\"London\",\"temp_c\":22,\"condition\":\"sunny\",\"humidity\":45}"
+            }
+          ],
+          "structuredContent": {
+            "city": "London",
+            "temp_c": 22,
+            "condition": "sunny",
+            "humidity": 45
+          },
+          "isError": false
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 6,
+      "http_method": null,
+      "http_path": null
+    },
+    {
+      "type": "lifecycle",
+      "request": null,
+      "response": null,
+      "response_is_sse": false,
+      "response_status": 200,
+      "latency_ms": 1,
+      "http_method": "DELETE",
+      "http_path": "/mcp"
+    },
+    {
+      "type": "lifecycle",
+      "request": null,
+      "response": null,
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 86,
+      "http_method": "GET",
+      "http_path": "/mcp"
+    }
+  ]
+}
