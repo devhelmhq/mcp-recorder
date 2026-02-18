@@ -63,7 +63,7 @@ Both modes use the same cassette. Record once, test from both sides.
 - **Two-sided testing** — mock the server (replay) or mock the client (verify) from the same recording
 - **Zero code changes** — swap the server URL to record, that's it
 - **Flexible matching** — method + params, sequential order, or strict equality
-- **Secret redaction** — auto-scrubs tokens and credentials before writing cassettes
+- **Explicit secret redaction** — opt-in flags to scrub URLs, env var values, and custom patterns
 - **CI-ready** — exits non-zero on mismatches, fully headless
 - **JSON cassettes** — human-readable, git-diff-friendly, optional YAML output
 
@@ -147,9 +147,10 @@ Record interactions from a live MCP server.
 | `--target` | *(required)* | URL of the real MCP server |
 | `--port` | `5555` | Local proxy port |
 | `--output` | `recording.json` | Output cassette file path |
-| `--format` | `json` | Cassette format: `json` or `yaml` |
-| `--no-redact` | — | Disable automatic secret redaction |
-| `--redact-patterns` | — | Additional regex patterns to redact |
+| `--verbose` | — | Log full headers and bodies to stderr |
+| `--redact-server-url` | `true` | Strip URL path from metadata (keeps scheme + host) |
+| `--redact-env VAR` | — | Redact named env var value from metadata + responses. Repeatable |
+| `--redact-patterns REGEX` | — | Redact regex matches from metadata + responses. Repeatable |
 
 ### `mcp-recorder replay`
 
@@ -160,7 +161,7 @@ Start a mock server from a recorded cassette.
 | `--cassette` | *(required)* | Path to cassette file |
 | `--port` | `5555` | Local server port |
 | `--match` | `method_params` | Matching strategy (see below) |
-| `--simulate-latency` | `false` | Replay with original recorded timing |
+| `--verbose` | — | Log every matched request to stderr |
 
 ### `mcp-recorder verify`
 
@@ -170,8 +171,9 @@ Replay recorded requests against a server and compare responses to the cassette.
 |---|---|---|
 | `--cassette` | *(required)* | Path to golden cassette file |
 | `--target` | *(required)* | URL of the server to verify |
-| `--ignore-fields` | — | JSON paths to ignore during comparison (e.g., `result.timestamp`) |
-| `--update` | `false` | Update the cassette with new responses (like snapshot update) |
+| `--ignore-fields` | — | Response fields to ignore during comparison |
+| `--update` | — | Update the cassette with new responses (snapshot update) |
+| `--verbose` | — | Show full diff for each failing interaction |
 
 ### `mcp-recorder inspect`
 
@@ -246,13 +248,46 @@ Cassettes store raw JSON-RPC messages as they appear on the wire:
 
 ### Secret Redaction
 
-By default, values matching environment variables with sensitive names (`*_TOKEN`, `*_KEY`, `*_SECRET`, `*_PASSWORD`) are replaced with `<REDACTED>` in cassettes. Known sensitive headers (`Authorization`, `Cookie`) are stripped.
+Redaction is explicit — no magic scanning, no hidden behavior. You control exactly what gets scrubbed.
 
-Add custom patterns:
+**`--redact-server-url`** (enabled by default)
+
+Strips the URL path from `metadata.server_url`, keeping only the scheme and host. This is the most common case: API keys embedded in URLs like `https://mcp.firecrawl.dev/<key>/mcp`.
 
 ```bash
-mcp-recorder record --target http://localhost:8000 --redact-patterns "sk-[a-zA-Z0-9]+"
+# Cassette metadata will show: https://mcp.firecrawl.dev/[REDACTED]
+mcp-recorder record --target https://mcp.firecrawl.dev/$FIRECRAWL_KEY/mcp
+
+# Disable if you want the full URL preserved
+mcp-recorder record --target http://localhost:8000 --no-redact-server-url
 ```
+
+**`--redact-env VAR_NAME`**
+
+Reads the value of the named environment variable and replaces every occurrence in **metadata and response bodies**. Request bodies are never modified — this preserves replay and verify integrity.
+
+```bash
+export FIRECRAWL_KEY=fc-abc123
+mcp-recorder record \
+  --target https://mcp.firecrawl.dev/$FIRECRAWL_KEY/mcp \
+  --redact-env FIRECRAWL_KEY
+```
+
+If a redacted value is also found in a request body, a warning is printed but the request is left intact. This is a deliberate tradeoff: redacting request bodies would break replay matching and verify.
+
+**`--redact-patterns REGEX`**
+
+For values not in environment variables. Same scope as `--redact-env` (metadata + responses only).
+
+```bash
+mcp-recorder record --target http://localhost:8000 \
+  --redact-patterns "sk-[a-zA-Z0-9]+" \
+  --redact-patterns "session-[0-9a-f]{32}"
+```
+
+**What about HTTP headers?**
+
+Headers (Authorization, Cookie, etc.) are not stored in cassettes. The proxy only captures JSON-RPC message bodies and protocol metadata, so header secrets never reach the cassette file.
 
 ## CI Integration
 
