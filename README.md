@@ -1,22 +1,24 @@
 # mcp-recorder
 
-Record, replay, and verify MCP server interactions for deterministic testing.
+**VCR.py for MCP servers.** Record, replay, and verify Model Context Protocol interactions for deterministic testing.
 
 [![PyPI version](https://img.shields.io/pypi/v/mcp-recorder.svg)](https://pypi.org/project/mcp-recorder/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/devhelm/mcp-recorder/actions/workflows/ci.yml/badge.svg)](https://github.com/devhelm/mcp-recorder/actions)
+[![CI](https://github.com/devhelm/mcp-recorder/actions/workflows/check.yml/badge.svg)](https://github.com/devhelm/mcp-recorder/actions)
+
+MCP servers break silently. Tool schemas change, prompts drift, responses shift. Without wire-level regression tests, you find out from your users. mcp-recorder captures the full protocol exchange into a cassette file and lets you test from both sides.
 
 ## Record. Replay. Verify.
 
 ```bash
-# Record a golden interaction session from a live MCP server
+# 1. Record a session from a live MCP server
 mcp-recorder record --target http://localhost:8000 --output golden.json
 
-# Replay as a mock server — test your client without the real server
+# 2. Replay as a mock server — test your client without the real server
 mcp-recorder replay --cassette golden.json
 
-# Verify your server hasn't regressed — replay recorded requests, compare responses
+# 3. Verify your server hasn't regressed — compare responses to the recording
 mcp-recorder verify --cassette golden.json --target http://localhost:8000
 ```
 
@@ -34,15 +36,41 @@ Or with [uv](https://docs.astral.sh/uv/):
 uv add mcp-recorder
 ```
 
-For YAML cassette support:
+## Testing with pytest
+
+The pytest plugin activates automatically on install. Mark tests with a cassette and use the `mcp_replay_url` fixture:
+
+```python
+import pytest
+from fastmcp import Client
+
+@pytest.mark.mcp_cassette("cassettes/golden.json")
+async def test_tool_call(mcp_replay_url):
+    """A replay server starts automatically, serves the cassette, shuts down after the test."""
+    async with Client(mcp_replay_url) as client:
+        result = await client.call_tool("add", {"a": 2, "b": 3})
+        assert result.content[0].text == "5"
+```
+
+For server regression testing, use `mcp_verify_result`:
+
+```python
+@pytest.mark.mcp_cassette("cassettes/golden.json")
+def test_no_regression(mcp_verify_result):
+    assert mcp_verify_result.failed == 0, mcp_verify_result.results
+```
 
 ```bash
-pip install mcp-recorder[yaml]
+pytest                                    # replay from cassettes (default)
+pytest --mcp-target http://localhost:8000  # verify against live server
+pytest --mcp-record-mode=auto             # replay if cassette exists, skip if not
 ```
+
+No manual server management. No boilerplate. 20 cassettes in one file works fine — each test gets an isolated server on a random port.
 
 ## How It Works
 
-mcp-recorder is a transparent HTTP proxy that captures the full MCP exchange — requests and responses — into a cassette file. That single recording unlocks two testing directions:
+mcp-recorder is a transparent HTTP proxy that captures the full MCP exchange into a cassette file. That single recording unlocks two testing directions:
 
 ```
 Record:   Client -> mcp-recorder (proxy) -> Real Server -> cassette.json
@@ -51,21 +79,9 @@ Replay:   Client -> mcp-recorder (mock)  -> cassette.json     (test your client)
 Verify:   mcp-recorder (client mock) -> Real Server            (test your server)
 ```
 
-**Replay** serves recorded responses back to your client. No real server, no credentials, no network. Use this to test client code against a frozen server.
+**Replay** serves recorded responses back to your client. No real server, no credentials, no network.
 
-**Verify** sends recorded requests to your (updated) server and compares the actual responses to the golden recording. Use this to catch regressions after changing tools, schemas, or prompts.
-
-Both modes use the same cassette. Record once, test from both sides.
-
-## Features
-
-- **MCP-aware** — captures the full JSON-RPC lifecycle: `initialize`, capabilities, tool calls, notifications
-- **Two-sided testing** — mock the server (replay) or mock the client (verify) from the same recording
-- **Zero code changes** — swap the server URL to record, that's it
-- **Flexible matching** — method + params, sequential order, or strict equality
-- **Explicit secret redaction** — opt-in flags to scrub URLs, env var values, and custom patterns
-- **CI-ready** — exits non-zero on mismatches, fully headless
-- **JSON cassettes** — human-readable, git-diff-friendly, optional YAML output
+**Verify** sends recorded requests to your (updated) server and compares the actual responses to the golden recording. Catches regressions after changing tools, schemas, or prompts.
 
 ## Quick Start
 
@@ -85,7 +101,10 @@ Point your MCP client at `http://localhost:5555` and interact normally. Press `C
 Works with remote servers too:
 
 ```bash
-mcp-recorder record --target https://mcp.example.com/v1/mcp --output golden.json
+mcp-recorder record \
+  --target https://mcp.example.com/v1/mcp \
+  --redact-env API_KEY \
+  --output golden.json
 ```
 
 ### Replaying (client testing)
@@ -96,7 +115,7 @@ Serve recorded responses without the real server:
 mcp-recorder replay --cassette golden.json
 ```
 
-A mock server starts on port `5555`. Point your client at it and run your tests. No network, no credentials, same responses every time.
+A mock server starts on port `5555`. Point your client at it. No network, no credentials, same responses every time.
 
 ### Verifying (server regression testing)
 
@@ -107,58 +126,56 @@ mcp-recorder verify --cassette golden.json --target http://localhost:8000
 ```
 
 ```
-Verifying golden.json against http://localhost:8000...
+Verifying golden.json against http://localhost:8000
 
-  1. initialize             OK
-  2. tools/list             OK
-  3. tools/call [search]    DIFF
-     - result.content[0].text: "old output" != "new output"
-  4. tools/call [analyze]   OK
+  1. initialize          [PASS]
+  2. tools/list          [PASS]
+  3. tools/call [search] [FAIL]
+       $.result.content[0].text: "old output" != "new output"
+  4. tools/call [analyze] [PASS]
 
-3/4 passed, 1 failed
+Result: 3/4 passed, 1 failed
 ```
 
 Exit code is non-zero on any diff — plug it straight into CI.
 
-### Testing with pytest
-
-The plugin activates automatically when `mcp-recorder` is installed. Mark tests with a cassette path and request the `mcp_replay_url` fixture:
-
-```python
-import pytest
-from fastmcp import Client
-
-@pytest.mark.mcp_cassette("cassettes/golden.json")
-async def test_search_tool(mcp_replay_url):
-    async with Client(mcp_replay_url) as client:
-        result = await client.call_tool("search", {"query": "protocol"})
-        assert result.content[0].text == "expected output"
-```
-
-A replay server starts automatically on a random port, serves the cassette, and shuts down after the test. No manual server management.
-
-For server regression testing, use `mcp_verify_result`:
-
-```python
-@pytest.mark.mcp_cassette("cassettes/golden.json")
-def test_no_regression(mcp_verify_result):
-    assert mcp_verify_result.failed == 0, mcp_verify_result.results
-```
+### Inspecting a cassette
 
 ```bash
-# Run with --mcp-target pointing at your live server
-pytest --mcp-target http://localhost:8000
-
-# Control replay mode
-pytest --mcp-record-mode=replay   # default: serve from cassette
-pytest --mcp-record-mode=auto     # replay if cassette exists, skip if not
+mcp-recorder inspect golden.json
 ```
+
+```
+golden.json
+  Recorded: 2026-02-17 20:25:23
+  Server:   Test Calculator v2.14.5
+  Protocol: 2025-11-25
+  Target:   http://127.0.0.1:8000
+
+  Interactions (9):
+    1. initialize -> 200 SSE (7ms)
+    2. notifications/initialized -> 202 (1ms)
+    3. tools/list -> 200 SSE (22ms)
+    4. tools/call [add] -> 200 SSE (18ms)
+    ...
+
+  Summary: 6 requests, 1 notification, 2 lifecycle
+```
+
+## Features
+
+- **MCP-aware** — captures the full JSON-RPC lifecycle: `initialize`, capabilities, tool calls, notifications
+- **Two-sided testing** — mock the server (replay) or mock the client (verify) from one recording
+- **pytest plugin** — auto-activating fixtures for replay and verify, zero config
+- **Zero code changes** — swap the server URL to record, that's it
+- **Flexible matching** — method + params, sequential order, or strict equality
+- **Explicit secret redaction** — opt-in flags to scrub URLs, env var values, and regex patterns
+- **CI-ready** — exits non-zero on verify mismatches, fully headless
+- **JSON cassettes** — human-readable, git-diff-friendly
 
 ## CLI Reference
 
 ### `mcp-recorder record`
-
-Record interactions from a live MCP server.
 
 | Option | Default | Description |
 |---|---|---|
@@ -166,13 +183,11 @@ Record interactions from a live MCP server.
 | `--port` | `5555` | Local proxy port |
 | `--output` | `recording.json` | Output cassette file path |
 | `--verbose` | — | Log full headers and bodies to stderr |
-| `--redact-server-url` | `true` | Strip URL path from metadata (keeps scheme + host) |
+| `--redact-server-url / --no-redact-server-url` | `true` | Strip URL path from metadata (keeps scheme + host) |
 | `--redact-env VAR` | — | Redact named env var value from metadata + responses. Repeatable |
 | `--redact-patterns REGEX` | — | Redact regex matches from metadata + responses. Repeatable |
 
 ### `mcp-recorder replay`
-
-Start a mock server from a recorded cassette.
 
 | Option | Default | Description |
 |---|---|---|
@@ -182,8 +197,6 @@ Start a mock server from a recorded cassette.
 | `--verbose` | — | Log every matched request to stderr |
 
 ### `mcp-recorder verify`
-
-Replay recorded requests against a server and compare responses to the cassette.
 
 | Option | Default | Description |
 |---|---|---|
@@ -195,64 +208,9 @@ Replay recorded requests against a server and compare responses to the cassette.
 
 ### `mcp-recorder inspect`
 
-Pretty-print a cassette summary.
-
-```bash
-mcp-recorder inspect golden.json
-```
-
-```
-Cassette: golden.json
-Recorded: 2026-02-16T12:00:00Z
-Server:   http://localhost:8000
-
-Interactions (12):
-  1. initialize                  <- 200  (42ms)
-  2. notifications/initialized
-  3. tools/list                  <- 200  (15ms)
-  4. tools/call [search]         <- 200  (183ms)
-  ...
-```
-
-## Cassette Format
-
-Cassettes store raw JSON-RPC messages as they appear on the wire:
-
-```json
-{
-  "version": "1.0",
-  "metadata": {
-    "recorded_at": "2026-02-16T12:00:00Z",
-    "server_url": "http://localhost:8000",
-    "transport": "http"
-  },
-  "interactions": [
-    {
-      "request": {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-          "protocolVersion": "2025-03-26",
-          "capabilities": {},
-          "clientInfo": { "name": "test-client", "version": "1.0" }
-        }
-      },
-      "response": {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {
-          "protocolVersion": "2025-03-26",
-          "capabilities": { "tools": { "listChanged": true } },
-          "serverInfo": { "name": "my-server", "version": "0.1.0" }
-        }
-      },
-      "timestamp": "2026-02-16T12:00:01.000Z",
-      "latency_ms": 42
-    }
-  ]
-}
-```
+| Argument | Description |
+|---|---|
+| `CASSETTE` | Path to cassette file to inspect |
 
 ## Configuration
 
@@ -260,9 +218,9 @@ Cassettes store raw JSON-RPC messages as they appear on the wire:
 
 | Strategy | Flag | Description |
 |---|---|---|
-| **Method + Params** | `method_params` | Match on JSON-RPC `method` and `params` (default) |
-| **Sequential** | `sequential` | Return next unmatched interaction in order |
-| **Strict** | `strict` | Full structural equality of the request body |
+| **Method + Params** | `method_params` | Match on JSON-RPC `method` and `params`, ignoring `_meta` (default) |
+| **Sequential** | `sequential` | Return next unmatched interaction in recorded order |
+| **Strict** | `strict` | Full structural equality of the request body including `_meta` |
 
 ### Secret Redaction
 
@@ -270,32 +228,29 @@ Redaction is explicit — no magic scanning, no hidden behavior. You control exa
 
 **`--redact-server-url`** (enabled by default)
 
-Strips the URL path from `metadata.server_url`, keeping only the scheme and host. This is the most common case: API keys embedded in URLs like `https://mcp.firecrawl.dev/<key>/mcp`.
+Strips the URL path from `metadata.server_url`, keeping only the scheme and host. Handles the common case of API keys in URLs like `https://mcp.firecrawl.dev/<key>/mcp`.
 
 ```bash
-# Cassette metadata will show: https://mcp.firecrawl.dev/[REDACTED]
 mcp-recorder record --target https://mcp.firecrawl.dev/$FIRECRAWL_KEY/mcp
+# metadata shows: https://mcp.firecrawl.dev/[REDACTED]
 
-# Disable if you want the full URL preserved
 mcp-recorder record --target http://localhost:8000 --no-redact-server-url
+# metadata shows full URL
 ```
 
 **`--redact-env VAR_NAME`**
 
-Reads the value of the named environment variable and replaces every occurrence in **metadata and response bodies**. Request bodies are never modified — this preserves replay and verify integrity.
+Reads the named env var's value and replaces it in **metadata and response bodies**. Request bodies are never modified — this preserves replay and verify integrity.
 
 ```bash
-export FIRECRAWL_KEY=fc-abc123
 mcp-recorder record \
   --target https://mcp.firecrawl.dev/$FIRECRAWL_KEY/mcp \
   --redact-env FIRECRAWL_KEY
 ```
 
-If a redacted value is also found in a request body, a warning is printed but the request is left intact. This is a deliberate tradeoff: redacting request bodies would break replay matching and verify.
-
 **`--redact-patterns REGEX`**
 
-For values not in environment variables. Same scope as `--redact-env` (metadata + responses only).
+For values not in environment variables. Same scope (metadata + responses only).
 
 ```bash
 mcp-recorder record --target http://localhost:8000 \
@@ -303,13 +258,49 @@ mcp-recorder record --target http://localhost:8000 \
   --redact-patterns "session-[0-9a-f]{32}"
 ```
 
-**What about HTTP headers?**
+HTTP headers (Authorization, Cookie, etc.) are not stored in cassettes — the proxy only captures JSON-RPC message bodies, so header secrets never reach the cassette file.
 
-Headers (Authorization, Cookie, etc.) are not stored in cassettes. The proxy only captures JSON-RPC message bodies and protocol metadata, so header secrets never reach the cassette file.
+## Cassette Format
+
+Cassettes store JSON-RPC messages at the protocol level:
+
+```json
+{
+  "version": "1.0",
+  "metadata": {
+    "recorded_at": "2026-02-17T20:25:23Z",
+    "server_url": "http://127.0.0.1:8000",
+    "protocol_version": "2025-11-25",
+    "server_info": { "name": "Test Calculator", "version": "2.14.5" }
+  },
+  "interactions": [
+    {
+      "type": "jsonrpc_request",
+      "request": {
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": { "protocolVersion": "2025-11-25", "capabilities": {} }
+      },
+      "response": {
+        "jsonrpc": "2.0", "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": { "tools": { "listChanged": true } },
+          "serverInfo": { "name": "Test Calculator", "version": "2.14.5" }
+        }
+      },
+      "response_is_sse": true,
+      "response_status": 200,
+      "latency_ms": 7
+    }
+  ]
+}
+```
 
 ## CI Integration
 
 ### GitHub Actions
+
+With the pytest plugin (recommended):
 
 ```yaml
 steps:
@@ -317,23 +308,17 @@ steps:
   - uses: actions/setup-python@v5
     with:
       python-version: "3.12"
-
   - run: pip install mcp-recorder
-
-  # Option A: Replay mock server + run client tests
-  - run: |
-      mcp-recorder replay --cassette golden.json --port 5555 &
-      sleep 1
-      pytest
-
-  # Option B: Verify server hasn't regressed
-  - run: mcp-recorder verify --cassette golden.json --target http://localhost:8000
+  - run: pytest
 ```
 
-Or with the pytest plugin (manages the server lifecycle automatically):
+Cassettes committed to the repo are replayed automatically. No server needed in CI.
+
+For server regression testing:
 
 ```yaml
-  - run: pytest tests/ -m mcp_cassette
+  - run: pip install mcp-recorder
+  - run: mcp-recorder verify --cassette golden.json --target ${{ secrets.MCP_SERVER_URL }}
 ```
 
 ## Roadmap
@@ -341,8 +326,7 @@ Or with the pytest plugin (manages the server lifecycle automatically):
 - [ ] `stdio` transport — subprocess wrapping for local MCP servers
 - [ ] WebSocket transport
 - [ ] `mcp-recorder diff` — compare two cassettes for breaking changes
-- [ ] Cassette auto-update mode
-- [ ] Visual session debugger
+- [ ] TypeScript/JS cassette support — same JSON format, Vitest/Jest plugin
 
 ## Contributing
 
