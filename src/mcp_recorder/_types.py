@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+CASSETTE_FORMAT_VERSION = "1.0"
 
 
 class InteractionType(StrEnum):
@@ -79,9 +81,21 @@ class CassetteMetadata(BaseModel):
 class Cassette(BaseModel):
     """A complete recorded MCP session."""
 
-    version: str = "1.0"
+    version: str = CASSETTE_FORMAT_VERSION
     metadata: CassetteMetadata = Field(default_factory=CassetteMetadata)
     interactions: list[CassetteInteraction] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_format_version(self) -> Cassette:
+        expected_major = CASSETTE_FORMAT_VERSION.split(".")[0]
+        actual_major = self.version.split(".")[0]
+        if actual_major != expected_major:
+            raise ValueError(
+                f"Incompatible cassette format version '{self.version}' "
+                f"(expected {expected_major}.x). "
+                f"Re-record the cassette with the current version of mcp-recorder."
+            )
+        return self
 
     def add_interaction(self, interaction: CassetteInteraction) -> None:
         """Append an interaction and extract metadata if this is the initialize response."""
