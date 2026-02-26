@@ -331,7 +331,7 @@ For server regression testing:
 ## Contributing
 
 ```bash
-git clone https://github.com/devhelm/mcp-recorder.git
+git clone https://github.com/devhelmhq/mcp-recorder.git
 cd mcp-recorder
 uv sync --group dev
 uv run pytest
