@@ -5,7 +5,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mcp-recorder.svg)](https://pypi.org/project/mcp-recorder/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/devhelm/mcp-recorder/actions/workflows/check.yml/badge.svg)](https://github.com/devhelm/mcp-recorder/actions)
+[![CI](https://github.com/devhelmhq/mcp-recorder/actions/workflows/check.yml/badge.svg)](https://github.com/devhelmhq/mcp-recorder/actions)
 
 MCP servers break silently. Tool schemas change, prompts drift, responses shift. Without wire-level regression tests, you find out from your users. mcp-recorder captures the full protocol exchange into a cassette file and lets you test from both sides.
 
