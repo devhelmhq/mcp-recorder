@@ -63,7 +63,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "mcp_cassette(path, *, match=None): bind an MCP cassette to this test",
+        "mcp_cassette(path, *, match=None, ignore_fields=None, ignore_paths=None): "
+        "bind an MCP cassette to this test",
     )
 
 
@@ -161,12 +162,14 @@ def mcp_verify_result(request: pytest.FixtureRequest) -> VerifyResult:
     cassette = load_cassette(cassette_path)
 
     marker = request.node.get_closest_marker("mcp_cassette")
-    ignore: frozenset[str] = frozenset()
+    ignore_fields: frozenset[str] = frozenset()
+    ignore_paths: frozenset[str] = frozenset()
     if marker is not None:
-        ignore_val = marker.kwargs.get("ignore_fields")
-        if ignore_val is not None:
-            ignore = (
-                frozenset(ignore_val) if isinstance(ignore_val, list | tuple | set) else frozenset()
-            )
+        fields_val = marker.kwargs.get("ignore_fields")
+        if fields_val is not None and isinstance(fields_val, list | tuple | set):
+            ignore_fields = frozenset(fields_val)
+        paths_val = marker.kwargs.get("ignore_paths")
+        if paths_val is not None and isinstance(paths_val, list | tuple | set):
+            ignore_paths = frozenset(paths_val)
 
-    return run_verify(cassette, target, ignore_fields=ignore)
+    return run_verify(cassette, target, ignore_fields=ignore_fields, ignore_paths=ignore_paths)

@@ -91,8 +91,18 @@ def record(
     default=None,
     help="Output directory for cassettes (default: cassettes/ next to scenarios file).",
 )
+@click.option(
+    "--scenario",
+    multiple=True,
+    help="Record only the named scenario(s). Repeatable. Default: all.",
+)
 @click.option("--verbose", is_flag=True, help="Log full request/response details to stderr.")
-def record_scenarios_cmd(scenarios_file: str, output_dir: str | None, verbose: bool) -> None:
+def record_scenarios_cmd(
+    scenarios_file: str,
+    output_dir: str | None,
+    scenario: tuple[str, ...],
+    verbose: bool,
+) -> None:
     """Record cassettes from a YAML scenarios file."""
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
@@ -102,12 +112,13 @@ def record_scenarios_cmd(scenarios_file: str, output_dir: str | None, verbose: b
 
     out = scenarios_path.parent / "cassettes" if output_dir is None else Path(output_dir)
 
+    total = len(scenario) if scenario else len(sf.scenarios)
     click.echo(f"Target: {sf.target}", err=True)
-    click.echo(f"Scenarios: {len(sf.scenarios)}", err=True)
+    click.echo(f"Scenarios: {total}", err=True)
     click.echo(f"Output: {out}/", err=True)
     click.echo("", err=True)
 
-    results = run_scenarios(sf, out, verbose=verbose)
+    results = run_scenarios(sf, out, scenario_names=scenario, verbose=verbose)
 
     click.echo("", err=True)
     total_interactions = sum(results.values())
@@ -193,13 +204,23 @@ def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
 @main.command()
 @click.option("--cassette", required=True, help="Path to golden cassette file.")
 @click.option("--target", required=True, help="URL of the server to verify.")
-@click.option("--ignore-fields", multiple=True, help="Response fields to ignore during comparison.")
+@click.option(
+    "--ignore-fields",
+    multiple=True,
+    help="Key name to ignore at any depth. Repeatable.",
+)
+@click.option(
+    "--ignore-paths",
+    multiple=True,
+    help="Exact dot-path to ignore (e.g. $.result.metadata.scrapeId). Repeatable.",
+)
 @click.option("--update", is_flag=True, help="Update the cassette with new responses.")
 @click.option("--verbose", is_flag=True, help="Show full diff for each failing interaction.")
 def verify(
     cassette: str,
     target: str,
     ignore_fields: tuple[str, ...],
+    ignore_paths: tuple[str, ...],
     update: bool,
     verbose: bool,
 ) -> None:
@@ -213,15 +234,18 @@ def verify(
         raise SystemExit(1)
 
     loaded = load_cassette(cassette_path)
-    ignore = frozenset(ignore_fields)
+    fields = frozenset(ignore_fields)
+    paths = frozenset(ignore_paths)
 
     click.echo(f"Verifying {cassette_path.name} against {target}", err=True)
     click.echo(f"Interactions: {len(loaded.interactions)}", err=True)
-    if ignore:
-        click.echo(f"Ignoring fields: {', '.join(ignore)}", err=True)
+    if fields:
+        click.echo(f"Ignoring fields: {', '.join(fields)}", err=True)
+    if paths:
+        click.echo(f"Ignoring paths: {', '.join(paths)}", err=True)
     click.echo("", err=True)
 
-    result = run_verify(loaded, target, ignore_fields=ignore)
+    result = run_verify(loaded, target, ignore_fields=fields, ignore_paths=paths)
 
     click.echo("", err=True)
     for r in result.results:

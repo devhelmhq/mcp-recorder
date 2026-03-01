@@ -41,16 +41,33 @@ class VerifyResult:
     results: list[InteractionResult] = field(default_factory=list)
 
 
-def _strip_volatile(obj: Any, ignore_fields: frozenset[str] = frozenset()) -> Any:
-    """Recursively strip volatile and user-ignored fields from a JSON structure."""
+def _strip_volatile(
+    obj: Any,
+    ignore_fields: frozenset[str] = frozenset(),
+    ignore_paths: frozenset[str] = frozenset(),
+    _current_path: str = "$",
+) -> Any:
+    """Recursively strip volatile and user-ignored fields from a JSON structure.
+
+    ignore_fields: key names stripped at any depth (e.g. "timestamp")
+    ignore_paths:  exact dot-paths stripped only at that location
+                   (e.g. "$.result.content[0].text.metadata.scrapeId")
+    """
     if isinstance(obj, dict):
-        return {
-            k: _strip_volatile(v, ignore_fields)
-            for k, v in obj.items()
-            if k not in _VOLATILE_KEYS and k not in ignore_fields
-        }
+        result: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in _VOLATILE_KEYS or k in ignore_fields:
+                continue
+            child_path = f"{_current_path}.{k}"
+            if child_path in ignore_paths:
+                continue
+            result[k] = _strip_volatile(v, ignore_fields, ignore_paths, child_path)
+        return result
     if isinstance(obj, list):
-        return [_strip_volatile(item, ignore_fields) for item in obj]
+        return [
+            _strip_volatile(item, ignore_fields, ignore_paths, f"{_current_path}[{i}]")
+            for i, item in enumerate(obj)
+        ]
     return obj
 
 
@@ -86,6 +103,19 @@ def _deep_diff(expected: Any, actual: Any, path: str = "$") -> list[str]:
         return diffs
 
     if expected != actual:
+        # When both values are strings, try parsing as JSON for structural comparison.
+        # Handles MCP tools that return JSON-as-string in content[0].text.
+        if isinstance(expected, str) and isinstance(actual, str):
+            try:
+                parsed_expected = json.loads(expected)
+                parsed_actual = json.loads(actual)
+                if isinstance(parsed_expected, dict | list) and isinstance(
+                    parsed_actual, dict | list
+                ):
+                    return _deep_diff(parsed_expected, parsed_actual, path)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+
         diffs.append(
             f"  {path}: {json.dumps(expected, default=str)} != {json.dumps(actual, default=str)}"
         )
@@ -134,6 +164,7 @@ async def verify_cassette(
     target_url: str,
     *,
     ignore_fields: frozenset[str] = frozenset(),
+    ignore_paths: frozenset[str] = frozenset(),
 ) -> VerifyResult:
     """Replay all interactions from a cassette against the target and compare responses."""
     target_url = target_url.rstrip("/")
@@ -179,7 +210,11 @@ async def verify_cassette(
                     )
                 )
                 logger.info(
-                    "[%d] %s -> %d (%s)", idx + 1, method_name, status, "pass" if passed else "FAIL"
+                    "[%d] %s -> %d (%s)",
+                    idx + 1,
+                    method_name,
+                    status,
+                    "pass" if passed else "FAIL",
                 )
                 continue
 
@@ -188,8 +223,8 @@ async def verify_cassette(
                 client, mcp_url, interaction, session_id
             )
 
-            expected_clean = _strip_volatile(interaction.response, ignore_fields)
-            actual_clean = _strip_volatile(actual_body, ignore_fields)
+            expected_clean = _strip_volatile(interaction.response, ignore_fields, ignore_paths)
+            actual_clean = _strip_volatile(actual_body, ignore_fields, ignore_paths)
 
             diff_lines = _deep_diff(expected_clean, actual_clean)
             passed = len(diff_lines) == 0
@@ -228,6 +263,11 @@ def run_verify(
     target_url: str,
     *,
     ignore_fields: frozenset[str] = frozenset(),
+    ignore_paths: frozenset[str] = frozenset(),
 ) -> VerifyResult:
     """Synchronous wrapper around verify_cassette."""
-    return asyncio.run(verify_cassette(cassette, target_url, ignore_fields=ignore_fields))
+    return asyncio.run(
+        verify_cassette(
+            cassette, target_url, ignore_fields=ignore_fields, ignore_paths=ignore_paths
+        )
+    )

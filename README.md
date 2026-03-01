@@ -74,6 +74,12 @@ Record all scenarios at once:
 mcp-recorder record-scenarios scenarios.yml
 ```
 
+Or record a specific one:
+
+```bash
+mcp-recorder record-scenarios scenarios.yml --scenario tools_and_schemas
+```
+
 This produces `cassettes/tools_and_schemas.json` and `cassettes/error_handling.json`. Each scenario gets its own cassette. Protocol handshake (`initialize` + `notifications/initialized`) is handled automatically.
 
 Supported actions:
@@ -109,6 +115,18 @@ For server regression testing, use `mcp_verify_result`:
 @pytest.mark.mcp_cassette("cassettes/golden.json")
 def test_no_regression(mcp_verify_result):
     assert mcp_verify_result.failed == 0, mcp_verify_result.results
+```
+
+To ignore volatile fields in pytest, pass them via the marker:
+
+```python
+@pytest.mark.mcp_cassette(
+    "cassettes/golden.json",
+    ignore_fields=["timestamp"],
+    ignore_paths=["$.result.metadata.requestId"],
+)
+def test_no_regression(mcp_verify_result):
+    assert mcp_verify_result.failed == 0
 ```
 
 ```bash
@@ -209,6 +227,16 @@ Result: 3/4 passed, 1 failed
 
 Exit code is non-zero on any diff — plug it straight into CI.
 
+For fields that change every run, skip them by name (matches at any depth) or by exact path:
+
+```bash
+mcp-recorder verify --cassette golden.json --target http://localhost:8000 \
+  --ignore-fields timestamp \
+  --ignore-paths '$.result.content[0].text.metadata.requestId'
+```
+
+When both values are JSON-encoded strings (common in MCP `content[0].text`), mcp-recorder automatically parses and compares them structurally instead of as raw strings.
+
 When a change is intentional, update the cassette:
 
 ```bash
@@ -242,7 +270,9 @@ golden.json
 
 - **MCP-aware** — captures the full JSON-RPC lifecycle: `initialize`, capabilities, tool calls, notifications
 - **Two-sided testing** — mock the server (replay) or mock the client (verify) from one recording
-- **YAML scenarios** — define test actions declaratively, no code required
+- **Smart diff** — detects JSON-in-string values and compares structurally, not as raw text
+- **Ignore fields & paths** — skip volatile keys at any depth (`--ignore-fields`) or at exact locations (`--ignore-paths`)
+- **YAML scenarios** — define test actions declaratively, no code required; `--scenario` flag for selective recording
 - **Python API** — `RecordSession` context manager for programmatic recording
 - **pytest plugin** — auto-activating fixtures for replay and verify, zero config
 - **Zero code changes** — swap the server URL to record, that's it
@@ -271,6 +301,7 @@ golden.json
 |---|---|---|
 | `SCENARIOS_FILE` | *(required)* | Path to YAML scenarios file |
 | `--output-dir` | `cassettes/` next to file | Output directory for cassettes |
+| `--scenario NAME` | all | Record only the named scenario(s). Repeatable |
 | `--verbose` | — | Log full request/response details to stderr |
 
 ### `mcp-recorder replay`
@@ -288,7 +319,8 @@ golden.json
 |---|---|---|
 | `--cassette` | *(required)* | Path to golden cassette file |
 | `--target` | *(required)* | URL of the server to verify |
-| `--ignore-fields` | — | Response fields to ignore during comparison. Repeatable |
+| `--ignore-fields KEY` | — | Key name to ignore at **any depth** (e.g. `timestamp`). Repeatable |
+| `--ignore-paths PATH` | — | Exact dot-path to ignore (e.g. `$.result.metadata.scrapeId`). Repeatable |
 | `--update` | — | Update the cassette with new responses (snapshot update) |
 | `--verbose` | — | Show full diff for each failing interaction |
 
