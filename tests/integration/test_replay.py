@@ -8,19 +8,17 @@ from click.testing import CliRunner
 from fastmcp import Client
 
 from mcp_recorder._types import Cassette
+from mcp_recorder._utils import UvicornServer, find_free_port
 from mcp_recorder.cli import inspect as inspect_cmd
 from mcp_recorder.matcher import create_matcher
-from mcp_recorder.pytest_plugin import _ReplayServer
 from mcp_recorder.replayer import create_replay_app
 
 
-def _start_replay(cassette: Cassette) -> tuple[_ReplayServer, str]:
-    from mcp_recorder.pytest_plugin import _find_free_port
-
+def _start_replay(cassette: Cassette) -> tuple[UvicornServer, str]:
     matcher = create_matcher("method_params", cassette.interactions)
     app = create_replay_app(cassette, matcher)
-    port = _find_free_port()
-    server = _ReplayServer(app, port)
+    port = find_free_port()
+    server = UvicornServer(app, port)
     server.start()
     return server, server.url
 

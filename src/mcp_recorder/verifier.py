@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from mcp_recorder._types import Cassette, CassetteInteraction, InteractionType
+from mcp_recorder._utils import parse_sse_response
 
 logger = logging.getLogger("mcp_recorder.verifier")
 
@@ -92,22 +93,6 @@ def _deep_diff(expected: Any, actual: Any, path: str = "$") -> list[str]:
     return diffs
 
 
-def _parse_sse_response(text: str) -> dict[str, Any] | None:
-    """Extract the first JSON-RPC message from an SSE response body."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("data:"):
-            continue
-        payload = stripped[len("data:") :].strip()
-        if not payload:
-            continue
-        try:
-            return json.loads(payload)  # type: ignore[no-any-return]
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-    return None
-
-
 async def _send_request(
     client: httpx.AsyncClient,
     url: str,
@@ -135,7 +120,7 @@ async def _send_request(
     content_type = resp.headers.get("content-type", "")
 
     if "text/event-stream" in content_type:
-        parsed = _parse_sse_response(resp.text)
+        parsed = parse_sse_response(resp.text)
         return parsed, resp.status_code, new_sid
 
     try:

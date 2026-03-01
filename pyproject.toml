@@ -1,6 +1,6 @@
 [project]
 name = "mcp-recorder"
-version = "0.1.0"
+version = "0.2.0"
 description = "Record and replay MCP server interactions for deterministic testing."
 readme = "README.md"
 license = "MIT"
@@ -13,16 +13,18 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "click>=8.3.1",
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
+    "pyyaml>=6.0.3",
     "starlette>=0.52.1",
     "uvicorn>=0.40.0",
 ]
@@ -38,20 +40,15 @@ mcp-recorder = "mcp_recorder.cli:main"
 [project.entry-points."pytest11"]
 mcp_recorder = "mcp_recorder.pytest_plugin"
 
-[project.optional-dependencies]
-yaml = [
-    "pyyaml>=6.0.3",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.25",
     "ruff>=0.11",
     "mypy>=1.15",
-    "pyyaml>=6.0.3",
     "pre-commit>=4.0",
     "fastmcp>=2.0",
+    "types-pyyaml>=6.0.12.20250915",
 ]
 
 [build-system]
@@ -61,7 +58,7 @@ build-backend = "uv_build"
 # --- Tool Configuration ---
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
 
@@ -72,7 +69,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 known-first-party = ["mcp_recorder"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

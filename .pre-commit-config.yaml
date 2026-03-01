@@ -15,8 +15,10 @@ repos:
           - httpx>=0.28.1
           - pydantic>=2.12.5
           - pytest>=8.0
+          - pyyaml>=6.0.3
           - starlette>=0.52.1
+          - types-PyYAML>=6.0.0
           - uvicorn>=0.40.0
-        args: [--strict, --python-version=3.12]
+        args: [--strict, --python-version=3.11]
         pass_filenames: false
         entry: mypy src/

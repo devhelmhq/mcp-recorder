@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import sys
 from pathlib import Path
@@ -12,9 +11,11 @@ import uvicorn
 
 from mcp_recorder import __version__
 from mcp_recorder._types import Cassette, CassetteMetadata, InteractionType
+from mcp_recorder._utils import load_cassette, save_cassette
 from mcp_recorder.matcher import create_matcher
 from mcp_recorder.proxy import create_proxy_app
 from mcp_recorder.replayer import create_replay_app
+from mcp_recorder.scenarios import load_scenarios_file, run_scenarios
 from mcp_recorder.scrubber import scrub_cassette
 from mcp_recorder.verifier import run_verify
 
@@ -83,10 +84,37 @@ def record(
         )
 
 
-def _load_cassette(path: Path) -> Cassette:
-    """Load a cassette from a JSON file."""
-    raw = json.loads(path.read_text())
-    return Cassette.model_validate(raw)
+@main.command("record-scenarios")
+@click.argument("scenarios_file", type=click.Path(exists=True))
+@click.option(
+    "--output-dir",
+    default=None,
+    help="Output directory for cassettes (default: cassettes/ next to scenarios file).",
+)
+@click.option("--verbose", is_flag=True, help="Log full request/response details to stderr.")
+def record_scenarios_cmd(scenarios_file: str, output_dir: str | None, verbose: bool) -> None:
+    """Record cassettes from a YAML scenarios file."""
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+
+    scenarios_path = Path(scenarios_file)
+    sf = load_scenarios_file(scenarios_path)
+
+    out = scenarios_path.parent / "cassettes" if output_dir is None else Path(output_dir)
+
+    click.echo(f"Target: {sf.target}", err=True)
+    click.echo(f"Scenarios: {len(sf.scenarios)}", err=True)
+    click.echo(f"Output: {out}/", err=True)
+    click.echo("", err=True)
+
+    results = run_scenarios(sf, out, verbose=verbose)
+
+    click.echo("", err=True)
+    total_interactions = sum(results.values())
+    click.echo(
+        f"Done: {len(results)} scenario(s), {total_interactions} total interactions.",
+        err=True,
+    )
 
 
 def _save_cassette(
@@ -110,8 +138,7 @@ def _save_cassette(
         redact_patterns=redact_patterns,
     )
 
-    data = cassette.model_dump(mode="json")
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    save_cassette(cassette, path)
     click.echo(f"\nSaved {count} interactions to {path}", err=True)
 
 
@@ -136,7 +163,7 @@ def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
         click.echo(f"Error: cassette file not found: {cassette_path}", err=True)
         raise SystemExit(1)
 
-    loaded = _load_cassette(cassette_path)
+    loaded = load_cassette(cassette_path)
     matcher_obj = create_matcher(match, loaded.interactions)
     app = create_replay_app(loaded, matcher_obj)
 
@@ -185,7 +212,7 @@ def verify(
         click.echo(f"Error: cassette file not found: {cassette_path}", err=True)
         raise SystemExit(1)
 
-    loaded = _load_cassette(cassette_path)
+    loaded = load_cassette(cassette_path)
     ignore = frozenset(ignore_fields)
 
     click.echo(f"Verifying {cassette_path.name} against {target}", err=True)
@@ -230,7 +257,7 @@ def inspect(cassette: str) -> None:
         click.echo(f"Error: cassette file not found: {cassette_path}", err=True)
         raise SystemExit(1)
 
-    loaded = _load_cassette(cassette_path)
+    loaded = load_cassette(cassette_path)
     meta = loaded.metadata
 
     click.echo(cassette_path.name)

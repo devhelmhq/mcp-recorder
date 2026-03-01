@@ -11,19 +11,13 @@ Provides fixtures and markers for using MCP cassettes in tests:
 
 from __future__ import annotations
 
-import json
 import logging
-import socket
-import threading
-import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
 
 import pytest
-import uvicorn
 
-from mcp_recorder._types import Cassette
+from mcp_recorder._utils import UvicornServer, find_free_port, load_cassette
 from mcp_recorder.matcher import Matcher, create_matcher
 from mcp_recorder.replayer import create_replay_app
 from mcp_recorder.verifier import VerifyResult, run_verify
@@ -78,46 +72,6 @@ def pytest_configure(config: pytest.Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        port: int = s.getsockname()[1]
-        return port
-
-
-def _load_cassette(path: Path) -> Cassette:
-    raw = json.loads(path.read_text())
-    return Cassette.model_validate(raw)
-
-
-class _ReplayServer:
-    """Manages a uvicorn replay server running in a daemon thread."""
-
-    def __init__(self, app: Any, port: int) -> None:
-        self.port = port
-        self._config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-        self._server = uvicorn.Server(self._config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
-
-    def start(self, timeout: float = 5.0) -> None:
-        self._thread.start()
-        deadline = time.monotonic() + timeout
-        while not self._server.started:
-            if time.monotonic() > deadline:
-                raise RuntimeError(
-                    f"Replay server failed to start on port {self.port} within {timeout}s"
-                )
-            time.sleep(0.05)
-
-    def stop(self) -> None:
-        self._server.should_exit = True
-        self._thread.join(timeout=5.0)
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/mcp"
-
-
 def _resolve_cassette_path(request: pytest.FixtureRequest) -> tuple[Path, str]:
     """Extract cassette path and match strategy from the mcp_cassette marker."""
     marker = request.node.get_closest_marker("mcp_cassette")
@@ -169,12 +123,12 @@ def mcp_replay_url(request: pytest.FixtureRequest) -> Generator[str, None, None]
     if not cassette_path.exists():
         pytest.fail(f"Cassette file not found: {cassette_path}")
 
-    cassette = _load_cassette(cassette_path)
+    cassette = load_cassette(cassette_path)
     matcher: Matcher = create_matcher(match_strategy, cassette.interactions)
     app = create_replay_app(cassette, matcher)
 
-    port = _find_free_port()
-    server = _ReplayServer(app, port)
+    port = find_free_port()
+    server = UvicornServer(app, port)
     server.start()
 
     try:
@@ -204,7 +158,7 @@ def mcp_verify_result(request: pytest.FixtureRequest) -> VerifyResult:
     if not cassette_path.exists():
         pytest.fail(f"Cassette file not found: {cassette_path}")
 
-    cassette = _load_cassette(cassette_path)
+    cassette = load_cassette(cassette_path)
 
     marker = request.node.get_closest_marker("mcp_cassette")
     ignore: frozenset[str] = frozenset()
