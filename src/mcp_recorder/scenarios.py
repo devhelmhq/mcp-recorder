@@ -164,11 +164,25 @@ def run_scenarios(
     scenarios_file: ScenariosFile,
     output_dir: Path,
     *,
+    scenario_names: tuple[str, ...] = (),
     verbose: bool = False,
 ) -> dict[str, int]:
-    """Run all scenarios and return {name: interaction_count} for each."""
+    """Run scenarios and return {name: interaction_count} for each.
+
+    If scenario_names is non-empty, only the named scenarios are recorded.
+    """
+    to_run = scenarios_file.scenarios
+    if scenario_names:
+        unknown = set(scenario_names) - set(to_run)
+        if unknown:
+            available = ", ".join(sorted(to_run))
+            raise ValueError(
+                f"Unknown scenario(s): {', '.join(sorted(unknown))}. Available: {available}"
+            )
+        to_run = {k: v for k, v in to_run.items() if k in scenario_names}
+
     results: dict[str, int] = {}
-    for name, scenario in scenarios_file.scenarios.items():
+    for name, scenario in to_run.items():
         output_path = output_dir / f"{name}.json"
         count = asyncio.run(
             _run_single_scenario(

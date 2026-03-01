@@ -1,6 +1,6 @@
 [project]
 name = "mcp-recorder"
-version = "0.2.0"
+version = "0.3.0"
 description = "Record and replay MCP server interactions for deterministic testing."
 readme = "README.md"
 license = "MIT"
