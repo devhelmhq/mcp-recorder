@@ -74,6 +74,7 @@ class CassetteMetadata(BaseModel):
 
     recorded_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     server_url: str = ""
+    transport_type: str | None = None
     protocol_version: str | None = None
     server_info: dict[str, Any] | None = None
 

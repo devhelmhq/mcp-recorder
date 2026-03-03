@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from mcp_recorder._types import Cassette
 
 CASSETTES_DIR = Path(__file__).parent / "cassettes"
+STDIO_SERVER = Path(__file__).parent / "fixtures" / "stdio_server.py"
 
 
 @pytest.fixture
@@ -27,3 +29,9 @@ def mock_session_cassette(mock_session_path: Path) -> Cassette:
 
     raw = json.loads(mock_session_path.read_text())
     return Cassette.model_validate(raw)
+
+
+@pytest.fixture
+def stdio_server_command() -> list[str]:
+    """Command list to spawn the stdio test server."""
+    return [sys.executable, str(STDIO_SERVER)]

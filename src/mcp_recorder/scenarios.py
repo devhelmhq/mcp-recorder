@@ -15,6 +15,7 @@ from mcp_recorder._utils import UvicornServer, find_free_port, save_cassette
 from mcp_recorder.mcp_client import McpClient
 from mcp_recorder.proxy import create_proxy_app
 from mcp_recorder.scrubber import scrub_cassette
+from mcp_recorder.transport import StdioTransport
 
 logger = logging.getLogger("mcp_recorder.scenarios")
 
@@ -45,6 +46,15 @@ class RedactConfig(BaseModel):
     patterns: list[str] = Field(default_factory=list)
 
 
+class StdioTargetConfig(BaseModel):
+    """Stdio target configuration for scenarios YAML."""
+
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+
+
 class Scenario(BaseModel):
     description: str = ""
     actions: list[str | dict[str, Any]]
@@ -52,9 +62,19 @@ class Scenario(BaseModel):
 
 class ScenariosFile(BaseModel):
     schema_version: str = SCENARIOS_FORMAT_VERSION
-    target: str
+    target: str | StdioTargetConfig
     redact: RedactConfig = Field(default_factory=RedactConfig)
     scenarios: dict[str, Scenario]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_target(cls, data: Any) -> Any:
+        """Distinguish HTTP URL strings from stdio config dicts."""
+        if isinstance(data, dict) and "target" in data:
+            target = data["target"]
+            if isinstance(target, dict) and "command" in target:
+                data["target"] = StdioTargetConfig.model_validate(target)
+        return data
 
     @model_validator(mode="after")
     def _check_schema_version(self) -> ScenariosFile:
@@ -113,17 +133,44 @@ async def _execute_action(client: McpClient, action: str | dict[str, Any]) -> No
 # ---------------------------------------------------------------------------
 
 
+def _resolve_target(
+    target: str | StdioTargetConfig,
+) -> tuple[str, str | None, StdioTransport | None]:
+    """Return ``(server_url, target_url_or_none, transport_or_none)``."""
+    if isinstance(target, StdioTargetConfig):
+        cmd_display = f"{target.command} {' '.join(target.args)}".strip()
+        server_url = f"stdio://{cmd_display}"
+        transport = StdioTransport(
+            command=target.command,
+            args=target.args,
+            env=target.env or None,
+            cwd=target.cwd,
+        )
+        return server_url, None, transport
+    return target, target, None
+
+
 async def _run_single_scenario(
     name: str,
     scenario: Scenario,
-    target_url: str,
+    target: str | StdioTargetConfig,
     output_path: Path,
     redact: RedactConfig,
     verbose: bool,
 ) -> int:
     """Record one scenario. Returns the number of interactions captured."""
-    cassette = Cassette(metadata=CassetteMetadata(server_url=target_url))
-    app = create_proxy_app(target_url=target_url, cassette=cassette, verbose=verbose)
+    server_url, target_url, transport = _resolve_target(target)
+
+    metadata = CassetteMetadata(
+        server_url=server_url,
+        transport_type="stdio" if transport else "http",
+    )
+    cassette = Cassette(metadata=metadata)
+
+    if transport:
+        app = create_proxy_app(cassette=cassette, transport=transport, verbose=verbose)
+    else:
+        app = create_proxy_app(cassette=cassette, target_url=target_url, verbose=verbose)
 
     port = find_free_port()
     server = UvicornServer(app, port)
@@ -188,7 +235,7 @@ def run_scenarios(
             _run_single_scenario(
                 name=name,
                 scenario=scenario,
-                target_url=scenarios_file.target,
+                target=scenarios_file.target,
                 output_path=output_path,
                 redact=scenarios_file.redact,
                 verbose=verbose,

@@ -6,12 +6,12 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
+from mcp_recorder._types import Cassette, InteractionType
 
-from mcp_recorder._types import Cassette, CassetteInteraction, InteractionType
-from mcp_recorder._utils import parse_sse_response
+if TYPE_CHECKING:
+    from mcp_recorder.transport import Transport
 
 logger = logging.getLogger("mcp_recorder.verifier")
 
@@ -123,105 +123,79 @@ def _deep_diff(expected: Any, actual: Any, path: str = "$") -> list[str]:
     return diffs
 
 
-async def _send_request(
-    client: httpx.AsyncClient,
-    url: str,
-    interaction: CassetteInteraction,
-    session_id: str | None,
-) -> tuple[dict[str, Any] | None, int, str | None]:
-    """Send a single interaction request and return (response_body, status, session_id)."""
-    headers: dict[str, str] = {
-        "content-type": "application/json",
-        "accept": "application/json, text/event-stream",
-    }
-    if session_id:
-        headers["mcp-session-id"] = session_id
-
-    if interaction.type == InteractionType.LIFECYCLE:
-        method = interaction.http_method or "DELETE"
-        resp = await client.request(method=method, url=url, headers=headers)
-        new_sid = resp.headers.get("mcp-session-id", session_id)
-        return None, resp.status_code, new_sid
-
-    body = json.dumps(interaction.request).encode() if interaction.request else b""
-    resp = await client.post(url, content=body, headers=headers)
-
-    new_sid = resp.headers.get("mcp-session-id", session_id)
-    content_type = resp.headers.get("content-type", "")
-
-    if "text/event-stream" in content_type:
-        parsed = parse_sse_response(resp.text)
-        return parsed, resp.status_code, new_sid
-
-    try:
-        return resp.json(), resp.status_code, new_sid
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return None, resp.status_code, new_sid
-
-
-async def verify_cassette(
+async def _verify_with_transport(
     cassette: Cassette,
-    target_url: str,
+    transport: Transport,
     *,
     ignore_fields: frozenset[str] = frozenset(),
     ignore_paths: frozenset[str] = frozenset(),
 ) -> VerifyResult:
-    """Replay all interactions from a cassette against the target and compare responses."""
-    target_url = target_url.rstrip("/")
-    mcp_url = f"{target_url}/mcp" if not target_url.endswith("/mcp") else target_url
-
+    """Core verification loop using a :class:`Transport`."""
     results: list[InteractionResult] = []
-    session_id: str | None = None
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
+    async with transport:
         for idx, interaction in enumerate(cassette.interactions):
             method_name = interaction.jsonrpc_method or interaction.http_method or "unknown"
 
+            # Lifecycle interactions are HTTP-specific — skip for non-HTTP transports,
+            # pass through for HttpTransport (which exposes send_lifecycle).
             if interaction.type == InteractionType.LIFECYCLE:
-                actual_body, status, session_id = await _send_request(
-                    client, mcp_url, interaction, session_id
-                )
-                results.append(
-                    InteractionResult(
-                        index=idx + 1,
-                        method=f"{interaction.http_method} {interaction.http_path}",
-                        passed=True,
+                if hasattr(transport, "send_lifecycle"):
+                    http_method = interaction.http_method or "DELETE"
+                    http_path = interaction.http_path or "/mcp"
+                    status = await transport.send_lifecycle(http_method, http_path)
+                    results.append(
+                        InteractionResult(
+                            index=idx + 1,
+                            method=f"{interaction.http_method} {interaction.http_path}",
+                            passed=True,
+                        )
                     )
-                )
-                logger.info("[%d] %s -> %d (lifecycle)", idx + 1, method_name, status)
+                    logger.info("[%d] %s -> %d (lifecycle)", idx + 1, method_name, status)
+                else:
+                    results.append(
+                        InteractionResult(
+                            index=idx + 1,
+                            method=f"{interaction.http_method} {interaction.http_path}",
+                            passed=True,
+                        )
+                    )
+                    logger.info("[%d] %s (lifecycle, skipped)", idx + 1, method_name)
                 continue
 
             if interaction.type == InteractionType.NOTIFICATION:
-                actual_body, status, session_id = await _send_request(
-                    client, mcp_url, interaction, session_id
-                )
-                passed = status == interaction.response_status
-                diff_lines: list[str] = []
-                if not passed:
-                    diff_lines.append(
-                        f"  status: expected {interaction.response_status}, got {status}"
+                try:
+                    await transport.send_notification(interaction.request or {})
+                except Exception as exc:
+                    results.append(
+                        InteractionResult(
+                            index=idx + 1,
+                            method=method_name,
+                            passed=False,
+                            diff=[f"  transport error: {exc}"],
+                        )
                     )
+                    logger.info("[%d] %s -> FAIL (transport error)", idx + 1, method_name)
+                    continue
+
+                results.append(InteractionResult(index=idx + 1, method=method_name, passed=True))
+                logger.info("[%d] %s -> pass (notification)", idx + 1, method_name)
+                continue
+
+            # JSON-RPC request.
+            try:
+                actual_body = await transport.send_request(interaction.request or {})
+            except Exception as exc:
                 results.append(
                     InteractionResult(
                         index=idx + 1,
                         method=method_name,
-                        passed=passed,
-                        diff=diff_lines,
+                        passed=False,
+                        diff=[f"  transport error: {exc}"],
                     )
                 )
-                logger.info(
-                    "[%d] %s -> %d (%s)",
-                    idx + 1,
-                    method_name,
-                    status,
-                    "pass" if passed else "FAIL",
-                )
+                logger.info("[%d] %s -> FAIL (transport error)", idx + 1, method_name)
                 continue
-
-            # JSON-RPC request
-            actual_body, status, session_id = await _send_request(
-                client, mcp_url, interaction, session_id
-            )
 
             expected_clean = _strip_volatile(interaction.response, ignore_fields, ignore_paths)
             actual_clean = _strip_volatile(actual_body, ignore_fields, ignore_paths)
@@ -258,16 +232,47 @@ async def verify_cassette(
     )
 
 
+async def verify_cassette(
+    cassette: Cassette,
+    target_url: str | None = None,
+    *,
+    transport: Transport | None = None,
+    ignore_fields: frozenset[str] = frozenset(),
+    ignore_paths: frozenset[str] = frozenset(),
+) -> VerifyResult:
+    """Replay all interactions from a cassette and compare responses.
+
+    Provide either *target_url* (HTTP) or *transport* (e.g. StdioTransport).
+    """
+    if target_url is None and transport is None:
+        raise ValueError("Either target_url or transport must be provided")
+
+    if transport is None:
+        from mcp_recorder.transport import HttpTransport
+
+        assert target_url is not None
+        transport = HttpTransport(target_url)
+
+    return await _verify_with_transport(
+        cassette, transport, ignore_fields=ignore_fields, ignore_paths=ignore_paths
+    )
+
+
 def run_verify(
     cassette: Cassette,
-    target_url: str,
+    target_url: str | None = None,
     *,
+    transport: Transport | None = None,
     ignore_fields: frozenset[str] = frozenset(),
     ignore_paths: frozenset[str] = frozenset(),
 ) -> VerifyResult:
     """Synchronous wrapper around verify_cassette."""
     return asyncio.run(
         verify_cassette(
-            cassette, target_url, ignore_fields=ignore_fields, ignore_paths=ignore_paths
+            cassette,
+            target_url,
+            transport=transport,
+            ignore_fields=ignore_fields,
+            ignore_paths=ignore_paths,
         )
     )
