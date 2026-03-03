@@ -226,7 +226,10 @@ class StdioTransport(Transport):
                     self._process.kill()
                     await self._process.wait()
                 except ProcessLookupError:
-                    pass
+                    logger.debug(
+                        "Process already exited before SIGKILL (pid=%d)",
+                        self._process.pid,
+                    )
 
         for task in (self._reader_task, self._stderr_task):
             if task and not task.done():
