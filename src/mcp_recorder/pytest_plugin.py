@@ -12,6 +12,7 @@ Provides fixtures and markers for using MCP cassettes in tests:
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Generator
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pytest
 from mcp_recorder._utils import UvicornServer, find_free_port, load_cassette
 from mcp_recorder.matcher import Matcher, create_matcher
 from mcp_recorder.replayer import create_replay_app
+from mcp_recorder.transport import StdioTransport
 from mcp_recorder.verifier import VerifyResult, run_verify
 
 logger = logging.getLogger("mcp_recorder.plugin")
@@ -46,6 +48,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--mcp-target",
         default=None,
         help="Live MCP server URL for record/verify modes.",
+    )
+    group.addoption(
+        "--mcp-target-stdio",
+        default=None,
+        help="Command to spawn as a stdio MCP server for verify mode.",
+    )
+    group.addoption(
+        "--mcp-target-env",
+        action="append",
+        default=[],
+        help="KEY=VALUE env var for the stdio subprocess. Repeatable.",
     )
     group.addoption(
         "--mcp-match",
@@ -142,7 +155,7 @@ def mcp_replay_url(request: pytest.FixtureRequest) -> Generator[str, None, None]
 def mcp_verify_result(request: pytest.FixtureRequest) -> VerifyResult:
     """Run verify against a live server and return the result.
 
-    Requires ``--mcp-target`` to be set.
+    Requires ``--mcp-target`` or ``--mcp-target-stdio`` to be set.
 
     Usage::
 
@@ -153,8 +166,13 @@ def mcp_verify_result(request: pytest.FixtureRequest) -> VerifyResult:
     cassette_path, _ = _resolve_cassette_path(request)
 
     target = request.config.getoption("--mcp-target")
-    if target is None:
-        pytest.fail("mcp_verify_result requires --mcp-target to be set")
+    target_stdio = request.config.getoption("--mcp-target-stdio")
+    target_env_raw: list[str] = request.config.getoption("--mcp-target-env") or []
+
+    if not target and not target_stdio:
+        pytest.fail("mcp_verify_result requires --mcp-target or --mcp-target-stdio to be set")
+    if target and target_stdio:
+        pytest.fail("--mcp-target and --mcp-target-stdio are mutually exclusive")
 
     if not cassette_path.exists():
         pytest.fail(f"Cassette file not found: {cassette_path}")
@@ -172,4 +190,20 @@ def mcp_verify_result(request: pytest.FixtureRequest) -> VerifyResult:
         if paths_val is not None and isinstance(paths_val, list | tuple | set):
             ignore_paths = frozenset(paths_val)
 
-    return run_verify(cassette, target, ignore_fields=ignore_fields, ignore_paths=ignore_paths)
+    transport = None
+    if target_stdio:
+        parts = shlex.split(target_stdio)
+        env: dict[str, str] = {}
+        for item in target_env_raw:
+            if "=" in item:
+                k, _, v = item.partition("=")
+                env[k] = v
+        transport = StdioTransport(command=parts[0], args=parts[1:], env=env or None)
+
+    return run_verify(
+        cassette,
+        target_url=target,
+        transport=transport,
+        ignore_fields=ignore_fields,
+        ignore_paths=ignore_paths,
+    )

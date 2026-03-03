@@ -192,7 +192,7 @@ class RecordSession:
     async def __aenter__(self) -> McpClient:
         self._cassette = Cassette(metadata=CassetteMetadata(server_url=self._target))
         app = create_proxy_app(
-            target_url=self._target, cassette=self._cassette, verbose=self._verbose
+            cassette=self._cassette, target_url=self._target, verbose=self._verbose
         )
 
         port = find_free_port()

@@ -20,9 +20,13 @@ mcp-recorder replay --cassette cassettes/golden.json
 
 # 3. Verify your server hasn't regressed — compare responses to the recording
 mcp-recorder verify --cassette cassettes/golden.json --target http://localhost:8000
+
+# Works with stdio servers too — no HTTP wrapper needed
+mcp-recorder verify --cassette golden.json \
+  --target-stdio "node dist/index.js"
 ```
 
-One cassette. Three modes. Full coverage for both client and server testing.
+One cassette. Three modes. HTTP and stdio transports. Full coverage for both client and server testing.
 
 ## Install
 
@@ -66,6 +70,26 @@ scenarios:
       - call_tool:
           name: search
           arguments: {}
+```
+
+For stdio MCP servers (subprocess-based), use a target object instead of a URL:
+
+```yaml
+schema_version: "1.0"
+
+target:
+  command: "node"
+  args: ["dist/index.js"]
+  env:
+    API_KEY: "test-key"
+
+scenarios:
+  basic_flow:
+    actions:
+      - list_tools
+      - call_tool:
+          name: search
+          arguments: { query: "test" }
 ```
 
 Record all scenarios at once:
@@ -130,9 +154,10 @@ def test_no_regression(mcp_verify_result):
 ```
 
 ```bash
-pytest                                    # replay from cassettes (default)
-pytest --mcp-target http://localhost:8000  # verify against live server
-pytest --mcp-record-mode=auto             # replay if cassette exists, skip if not
+pytest                                        # replay from cassettes (default)
+pytest --mcp-target http://localhost:8000      # verify against live HTTP server
+pytest --mcp-target-stdio "node dist/index.js" # verify against stdio server
+pytest --mcp-record-mode=auto                  # replay if cassette exists, skip if not
 ```
 
 No manual server management. No boilerplate. 20 cassettes in one file works fine — each test gets an isolated server on a random port.
@@ -156,10 +181,11 @@ async with RecordSession(
 
 ## How It Works
 
-mcp-recorder is a transparent HTTP proxy that captures the full MCP exchange into a cassette file. That single recording unlocks two testing directions:
+mcp-recorder captures the full MCP exchange into a cassette file. It supports both HTTP (Streamable HTTP / SSE) and stdio (subprocess) transports — the transport is an implementation detail, the cassette format is the same. That single recording unlocks two testing directions:
 
 ```
 Record:   Client -> mcp-recorder (proxy) -> Real Server -> cassette.json
+                                            (HTTP or stdio subprocess)
 
 Replay:   Client -> mcp-recorder (mock)  -> cassette.json     (test your client)
 Verify:   mcp-recorder (client mock) -> Real Server            (test your server)
@@ -176,13 +202,20 @@ Verify:   mcp-recorder (client mock) -> Real Server            (test your server
 For manual recording, start the proxy pointing at your MCP server:
 
 ```bash
+# HTTP target
 mcp-recorder record \
   --target http://localhost:8000 \
   --port 5555 \
   --output golden.json
+
+# stdio target — spawns the server as a subprocess
+mcp-recorder record \
+  --target-stdio "node dist/index.js" \
+  --target-env API_KEY=test-key \
+  --output golden.json
 ```
 
-Point your MCP client at `http://localhost:5555` and interact normally. Press `Ctrl+C` when done — the cassette is saved.
+Point your MCP client at `http://localhost:5555` and interact normally. Press `Ctrl+C` when done — the cassette is saved. For stdio targets, the subprocess is spawned automatically and terminated on exit.
 
 Works with remote servers too:
 
@@ -210,7 +243,13 @@ A mock server starts on port `5555`. Point your client at it. No network, no cre
 After making changes to your server, verify nothing broke:
 
 ```bash
+# HTTP target
 mcp-recorder verify --cassette golden.json --target http://localhost:8000
+
+# stdio target
+mcp-recorder verify --cassette golden.json \
+  --target-stdio "node dist/index.js" \
+  --target-env API_KEY=test-key
 ```
 
 ```
@@ -269,6 +308,7 @@ golden.json
 ## Features
 
 - **MCP-aware** — captures the full JSON-RPC lifecycle: `initialize`, capabilities, tool calls, notifications
+- **HTTP + stdio transports** — works with HTTP/SSE servers and subprocess-based stdio servers using the same cassette format
 - **Two-sided testing** — mock the server (replay) or mock the client (verify) from one recording
 - **Smart diff** — detects JSON-in-string values and compares structurally, not as raw text
 - **Ignore fields & paths** — skip volatile keys at any depth (`--ignore-fields`) or at exact locations (`--ignore-paths`)
@@ -287,7 +327,9 @@ golden.json
 
 | Option | Default | Description |
 |---|---|---|
-| `--target` | *(required)* | URL of the real MCP server |
+| `--target` | — | URL of the real MCP server (HTTP). Mutually exclusive with `--target-stdio` |
+| `--target-stdio` | — | Command to spawn a stdio MCP server (e.g. `"node dist/index.js"`). Mutually exclusive with `--target` |
+| `--target-env` | — | Environment variable for stdio subprocess as `KEY=VALUE`. Repeatable |
 | `--port` | `5555` | Local proxy port |
 | `--output` | `recording.json` | Output cassette file path |
 | `--verbose` | — | Log full headers and bodies to stderr |
@@ -318,7 +360,9 @@ golden.json
 | Option | Default | Description |
 |---|---|---|
 | `--cassette` | *(required)* | Path to golden cassette file |
-| `--target` | *(required)* | URL of the server to verify |
+| `--target` | — | URL of the server to verify (HTTP). Mutually exclusive with `--target-stdio` |
+| `--target-stdio` | — | Command to spawn a stdio MCP server. Mutually exclusive with `--target` |
+| `--target-env` | — | Environment variable for stdio subprocess as `KEY=VALUE`. Repeatable |
 | `--ignore-fields KEY` | — | Key name to ignore at **any depth** (e.g. `timestamp`). Repeatable |
 | `--ignore-paths PATH` | — | Exact dot-path to ignore (e.g. `$.result.metadata.scrapeId`). Repeatable |
 | `--update` | — | Update the cassette with new responses (snapshot update) |
@@ -414,6 +458,28 @@ scenarios:
           uri: file:///config.json
 ```
 
+The `target` field accepts either a string (HTTP URL) or an object (stdio config):
+
+```yaml
+# HTTP target
+target: http://localhost:3000
+
+# stdio target
+target:
+  command: "python"
+  args: ["-m", "my_server"]
+  env:
+    API_KEY: "test-key"
+  cwd: "./server"
+```
+
+| Target field | Required | Description |
+|---|---|---|
+| `command` | yes | Executable to spawn |
+| `args` | no | List of command-line arguments |
+| `env` | no | Extra environment variables (merged with current env) |
+| `cwd` | no | Working directory for the subprocess |
+
 Each scenario key becomes the cassette filename (`basic_flow` -> `basic_flow.json`). The `schema_version` field is validated on load — incompatible versions produce a clear error.
 
 ## Cassette Format
@@ -426,6 +492,7 @@ Cassettes store JSON-RPC messages at the protocol level:
   "metadata": {
     "recorded_at": "2026-02-17T20:25:23Z",
     "server_url": "http://127.0.0.1:8000",
+    "transport_type": "http",
     "protocol_version": "2025-11-25",
     "server_info": { "name": "Test Calculator", "version": "2.14.5" }
   },
@@ -451,6 +518,8 @@ Cassettes store JSON-RPC messages at the protocol level:
   ]
 }
 ```
+
+The `transport_type` field (`"http"` or `"stdio"`) is informational — it indicates how the cassette was recorded. For stdio recordings, `response_is_sse` is `false` and `response_status` is `null` since there is no HTTP layer.
 
 ## CI Integration
 
@@ -493,7 +562,7 @@ Cassettes committed to the repo are replayed automatically. No server needed in 
 
 ## Roadmap
 
-- [ ] `stdio` transport — subprocess wrapping for local MCP servers
+- [x] `stdio` transport — subprocess wrapping for local MCP servers
 - [ ] WebSocket transport
 - [ ] `mcp-recorder diff` — compare two cassettes for breaking changes
 - [ ] TypeScript/JS cassette support — same JSON format, Vitest/Jest plugin

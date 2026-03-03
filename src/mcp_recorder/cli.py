@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from mcp_recorder.proxy import create_proxy_app
 from mcp_recorder.replayer import create_replay_app
 from mcp_recorder.scenarios import load_scenarios_file, run_scenarios
 from mcp_recorder.scrubber import scrub_cassette
+from mcp_recorder.transport import StdioTransport
 from mcp_recorder.verifier import run_verify
 
 
@@ -26,8 +28,57 @@ def main() -> None:
     """Record, replay, and verify MCP server interactions for deterministic testing."""
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_target_env(raw: tuple[str, ...]) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` pairs from ``--target-env``."""
+    env: dict[str, str] = {}
+    for item in raw:
+        if "=" not in item:
+            raise click.BadParameter(
+                f"Expected KEY=VALUE format, got: {item!r}", param_hint="--target-env"
+            )
+        key, _, value = item.partition("=")
+        env[key] = value
+    return env
+
+
+def _build_stdio_transport(
+    target_stdio: str,
+    target_env: tuple[str, ...],
+) -> StdioTransport:
+    """Build a :class:`StdioTransport` from CLI flags."""
+    parts = shlex.split(target_stdio)
+    if not parts:
+        raise click.BadParameter("Command string is empty", param_hint="--target-stdio")
+    env = _parse_target_env(target_env)
+    return StdioTransport(command=parts[0], args=parts[1:], env=env)
+
+
+def _validate_target(target: str | None, target_stdio: str | None) -> None:
+    """Ensure exactly one of --target / --target-stdio is provided."""
+    if target and target_stdio:
+        raise click.UsageError("--target and --target-stdio are mutually exclusive.")
+    if not target and not target_stdio:
+        raise click.UsageError("Provide either --target (HTTP) or --target-stdio (subprocess).")
+
+
+# ---------------------------------------------------------------------------
+# record
+# ---------------------------------------------------------------------------
+
+
 @main.command()
-@click.option("--target", required=True, help="URL of the real MCP server.")
+@click.option("--target", default=None, help="URL of the real MCP server (HTTP).")
+@click.option("--target-stdio", default=None, help="Command to spawn as a stdio MCP server.")
+@click.option(
+    "--target-env",
+    multiple=True,
+    help="KEY=VALUE env var passed to the stdio subprocess. Repeatable.",
+)
 @click.option("--port", default=5555, show_default=True, help="Local proxy port.")
 @click.option("--output", default="recording.json", show_default=True, help="Output cassette file.")
 @click.option("--verbose", is_flag=True, help="Log full headers and bodies to stderr.")
@@ -48,7 +99,9 @@ def main() -> None:
     help="Regex pattern to redact from metadata + responses. Repeatable.",
 )
 def record(
-    target: str,
+    target: str | None,
+    target_stdio: str | None,
+    target_env: tuple[str, ...],
     port: int,
     output: str,
     verbose: bool,
@@ -57,16 +110,31 @@ def record(
     redact_patterns: tuple[str, ...],
 ) -> None:
     """Record interactions from a live MCP server."""
+    _validate_target(target, target_stdio)
+
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
 
-    cassette = Cassette(metadata=CassetteMetadata(server_url=target))
-    app = create_proxy_app(target_url=target, cassette=cassette, verbose=verbose)
+    if target_stdio:
+        transport = _build_stdio_transport(target_stdio, target_env)
+        server_url = f"stdio://{target_stdio}"
+        cassette = Cassette(
+            metadata=CassetteMetadata(server_url=server_url, transport_type="stdio"),
+        )
+        app = create_proxy_app(cassette=cassette, transport=transport, verbose=verbose)
+        display_target = f"stdio: {target_stdio}"
+    else:
+        assert target is not None
+        cassette = Cassette(
+            metadata=CassetteMetadata(server_url=target, transport_type="http"),
+        )
+        app = create_proxy_app(cassette=cassette, target_url=target, verbose=verbose)
+        display_target = target
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Proxying http://localhost:{port} -> {target}", err=True)
+    click.echo(f"Proxying http://localhost:{port} -> {display_target}", err=True)
     click.echo(f"Output:  {output_path}", err=True)
     click.echo("Press Ctrl+C to stop and save the recording.\n", err=True)
 
@@ -112,8 +180,14 @@ def record_scenarios_cmd(
 
     out = scenarios_path.parent / "cassettes" if output_dir is None else Path(output_dir)
 
+    from mcp_recorder.scenarios import StdioTargetConfig
+
     total = len(scenario) if scenario else len(sf.scenarios)
-    click.echo(f"Target: {sf.target}", err=True)
+    if isinstance(sf.target, StdioTargetConfig):
+        display_target = f"stdio: {sf.target.command} {' '.join(sf.target.args)}".strip()
+    else:
+        display_target = sf.target
+    click.echo(f"Target: {display_target}", err=True)
     click.echo(f"Scenarios: {total}", err=True)
     click.echo(f"Output: {out}/", err=True)
     click.echo("", err=True)
@@ -203,7 +277,13 @@ def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
 
 @main.command()
 @click.option("--cassette", required=True, help="Path to golden cassette file.")
-@click.option("--target", required=True, help="URL of the server to verify.")
+@click.option("--target", default=None, help="URL of the server to verify (HTTP).")
+@click.option("--target-stdio", default=None, help="Command to spawn as a stdio MCP server.")
+@click.option(
+    "--target-env",
+    multiple=True,
+    help="KEY=VALUE env var passed to the stdio subprocess. Repeatable.",
+)
 @click.option(
     "--ignore-fields",
     multiple=True,
@@ -218,13 +298,17 @@ def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
 @click.option("--verbose", is_flag=True, help="Show full diff for each failing interaction.")
 def verify(
     cassette: str,
-    target: str,
+    target: str | None,
+    target_stdio: str | None,
+    target_env: tuple[str, ...],
     ignore_fields: tuple[str, ...],
     ignore_paths: tuple[str, ...],
     update: bool,
     verbose: bool,
 ) -> None:
     """Replay recorded requests against a server and compare responses."""
+    _validate_target(target, target_stdio)
+
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
 
@@ -237,7 +321,14 @@ def verify(
     fields = frozenset(ignore_fields)
     paths = frozenset(ignore_paths)
 
-    click.echo(f"Verifying {cassette_path.name} against {target}", err=True)
+    if target_stdio:
+        transport = _build_stdio_transport(target_stdio, target_env)
+        display_target = f"stdio: {target_stdio}"
+    else:
+        transport = None
+        display_target = target  # type: ignore[assignment]
+
+    click.echo(f"Verifying {cassette_path.name} against {display_target}", err=True)
     click.echo(f"Interactions: {len(loaded.interactions)}", err=True)
     if fields:
         click.echo(f"Ignoring fields: {', '.join(fields)}", err=True)
@@ -245,7 +336,13 @@ def verify(
         click.echo(f"Ignoring paths: {', '.join(paths)}", err=True)
     click.echo("", err=True)
 
-    result = run_verify(loaded, target, ignore_fields=fields, ignore_paths=paths)
+    result = run_verify(
+        loaded,
+        target_url=target,
+        transport=transport,
+        ignore_fields=fields,
+        ignore_paths=paths,
+    )
 
     click.echo("", err=True)
     for r in result.results:
