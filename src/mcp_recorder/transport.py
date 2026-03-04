@@ -24,6 +24,7 @@ logger = logging.getLogger("mcp_recorder.transport")
 
 _SUBPROCESS_SHUTDOWN_TIMEOUT = 5.0
 _REQUEST_TIMEOUT = 120.0
+_STREAM_READER_LIMIT = 10 * 1024 * 1024  # 10 MB — MCP tools/list can exceed the 64 KB default
 
 
 class Transport(abc.ABC):
@@ -172,6 +173,7 @@ class StdioTransport(Transport):
             stderr=asyncio.subprocess.PIPE,
             env=merged_env,
             cwd=self._cwd,
+            limit=_STREAM_READER_LIMIT,
         )
         logger.info(
             "Spawned stdio server: %s %s (pid=%d)",
