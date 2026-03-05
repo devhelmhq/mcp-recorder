@@ -2,7 +2,7 @@
   <img src="hero.gif" alt="mcp-recorder demo" width="720" />
 </p>
 
-# mcp-recorder -- VRC.py for MCP servers
+# mcp-recorder — VCR.py for MCP servers
 
 Record, replay, and verify Model Context Protocol interactions for deterministic testing.
 
