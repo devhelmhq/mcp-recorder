@@ -1,0 +1,29 @@
+schema_version: "1.0"
+target: https://mcp.devhelm.io
+output: demo.json
+redact:
+  server_url: false
+
+scenarios:
+  demo_walkthrough:
+    description: "Full demo: list tools, call add, greet, and roll_dice"
+    actions:
+      - list_tools
+
+      - call_tool:
+          name: add
+          arguments:
+            a: 3
+            b: 7
+
+      - call_tool:
+          name: greet
+          arguments:
+            name: World
+            style: pirate
+
+      - call_tool:
+          name: lookup_status
+          arguments:
+            service: api
+
