@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="hero.gif" alt="mcp-recorder demo" width="720" />
+</p>
+
 # mcp-recorder
 
 **VCR.py for MCP servers.** Record, replay, and verify Model Context Protocol interactions for deterministic testing.
@@ -11,18 +15,25 @@ MCP servers break silently. Tool schemas change, prompts drift, responses shift.
 
 ## Record. Replay. Verify.
 
+Try it right now — a [`scenarios.yml`](scenarios.yml) and a public demo server at `https://mcp.devhelm.io` are included so you can run this without any setup:
+
 ```bash
+pip install mcp-recorder
+
 # 1. Record cassettes from a scenarios file (zero code)
 mcp-recorder record-scenarios scenarios.yml
 
-# 2. Replay as a mock server — test your client without the real server
-mcp-recorder replay --cassette cassettes/golden.json
+# 2. Inspect what was captured
+mcp-recorder inspect cassettes/demo_walkthrough.json
 
-# 3. Verify your server hasn't regressed — compare responses to the recording
-mcp-recorder verify --cassette cassettes/golden.json --target http://localhost:8000
+# 3. Replay as a mock server — test your client without the real server
+mcp-recorder replay --cassette cassettes/demo_walkthrough.json
+
+# 4. Verify your server hasn't regressed — compare responses to the recording
+mcp-recorder verify --cassette cassettes/demo_walkthrough.json --target https://mcp.devhelm.io
 
 # Works with stdio servers too — no HTTP wrapper needed
-mcp-recorder verify --cassette golden.json \
+mcp-recorder verify --cassette cassettes/golden.json \
   --target-stdio "node dist/index.js"
 ```
 
