@@ -26,11 +26,12 @@ mcp-recorder record-scenarios scenarios.yml
 # 2. Inspect what was captured
 mcp-recorder inspect cassettes/demo_walkthrough.json
 
-# 3. Replay as a mock server — test your client without the real server
-mcp-recorder replay --cassette cassettes/demo_walkthrough.json
-
-# 4. Verify your server hasn't regressed — compare responses to the recording
+# 3. Verify your server hasn't regressed — compare responses to the recording
 mcp-recorder verify --cassette cassettes/demo_walkthrough.json --target https://mcp.devhelm.io
+
+# 4. Replay as a mock server — test your client without the real server
+# (starts a local server on port 5555, point your MCP client at it)
+mcp-recorder replay --cassette cassettes/demo_walkthrough.json
 
 # Works with stdio servers too — no HTTP wrapper needed
 mcp-recorder verify --cassette cassettes/golden.json \
