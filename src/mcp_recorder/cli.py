@@ -33,6 +33,15 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _configure_logging(verbose: bool) -> None:
+    """Set up root logging and silence noisy third-party HTTP loggers."""
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+    if not verbose:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
 def _parse_target_env(raw: tuple[str, ...]) -> dict[str, str]:
     """Parse ``KEY=VALUE`` pairs from ``--target-env``."""
     env: dict[str, str] = {}
@@ -111,9 +120,7 @@ def record(
 ) -> None:
     """Record interactions from a live MCP server."""
     _validate_target(target, target_stdio)
-
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+    _configure_logging(verbose)
 
     if target_stdio:
         transport = _build_stdio_transport(target_stdio, target_env)
@@ -172,8 +179,7 @@ def record_scenarios_cmd(
     verbose: bool,
 ) -> None:
     """Record cassettes from a YAML scenarios file."""
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+    _configure_logging(verbose)
 
     scenarios_path = Path(scenarios_file)
     sf = load_scenarios_file(scenarios_path)
@@ -240,8 +246,7 @@ def _save_cassette(
 @click.option("--verbose", is_flag=True, help="Log every matched request to stderr.")
 def replay(cassette: str, port: int, match: str, verbose: bool) -> None:
     """Start a mock MCP server from a recorded cassette."""
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+    _configure_logging(verbose)
 
     cassette_path = Path(cassette)
     if not cassette_path.exists():
@@ -308,9 +313,7 @@ def verify(
 ) -> None:
     """Replay recorded requests against a server and compare responses."""
     _validate_target(target, target_stdio)
-
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+    _configure_logging(verbose)
 
     cassette_path = Path(cassette)
     if not cassette_path.exists():
