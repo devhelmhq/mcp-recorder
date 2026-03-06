@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,37 @@ from mcp_recorder.transport import StdioTransport
 logger = logging.getLogger("mcp_recorder.scenarios")
 
 SCENARIOS_FORMAT_VERSION = "1.0"
+
+# ---------------------------------------------------------------------------
+# Environment variable interpolation
+# ---------------------------------------------------------------------------
+
+# Matches ${VAR} and ${VAR:-default}
+_ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::-((?:[^}\\]|\\.)*)?)?\}")
+
+
+def _expand_env_vars(obj: Any) -> Any:
+    """Recursively expand ``${VAR}`` and ``${VAR:-default}`` in string values."""
+    if isinstance(obj, str):
+
+        def _replace(m: re.Match[str]) -> str:
+            name = m.group(1).strip()
+            default = m.group(2)
+            value = os.environ.get(name)
+            if value is None and default is None:
+                raise ValueError(
+                    f"Environment variable '{name}' is not set "
+                    f"and no default was provided (referenced as ${{{name}}})"
+                )
+            return value if value is not None else default
+
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    if isinstance(obj, dict):
+        return {k: _expand_env_vars(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_env_vars(item) for item in obj]
+    return obj
+
 
 # ---------------------------------------------------------------------------
 # YAML schema models
@@ -200,10 +233,15 @@ async def _run_single_scenario(
 
 
 def load_scenarios_file(path: Path) -> ScenariosFile:
-    """Parse and validate a YAML scenarios file."""
+    """Parse and validate a YAML scenarios file.
+
+    ``${VAR}`` and ``${VAR:-default}`` references in string values are expanded
+    from the current environment before validation.
+    """
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
         raise ValueError(f"Scenarios file must be a YAML mapping, got {type(raw).__name__}")
+    raw = _expand_env_vars(raw)
     return ScenariosFile.model_validate(raw)
 
 
