@@ -135,6 +135,52 @@ target:
 | `env` | no | Extra environment variables (merged with current env) |
 | `cwd` | no | Working directory for the subprocess |
 
+### Environment Variables
+
+String values in `scenarios.yml` support `${VAR}` interpolation — the variable is resolved from the current environment at load time. Use `${VAR:-default}` to provide a fallback when the variable is not set. If a referenced variable is missing and no default is provided, loading fails with a clear error.
+
+```yaml
+schema_version: "1.0"
+
+target:
+  command: "node"
+  args: ["dist/index.js"]
+  env:
+    API_KEY: "${API_KEY}"
+    REGION: "${AWS_REGION:-us-east-1}"
+
+redact:
+  env:
+    - API_KEY
+
+scenarios:
+  authenticated_search:
+    description: "Search with a real API key"
+    actions:
+      - list_tools
+      - call_tool:
+          name: search
+          arguments:
+            query: "test"
+```
+
+This works naturally with CI systems. In GitHub Actions, expose repository secrets as environment variables and `scenarios.yml` picks them up:
+
+```yaml
+# .github/workflows/mcp-test.yml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      API_KEY: ${{ secrets.API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install mcp-recorder
+      - run: mcp-recorder record-scenarios scenarios.yml -o cassettes/
+```
+
+Interpolation applies to all string values: `target` URLs, `target.env` values, tool arguments, resource URIs, etc. Non-string values (numbers, booleans) are left unchanged. Dictionary keys are not expanded.
+
 Record all scenarios at once, or pick one:
 
 ```bash
